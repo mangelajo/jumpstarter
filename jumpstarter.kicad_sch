@@ -5146,6 +5146,30 @@
     )
   )
 
+  (symbol (lib_id "Mechanical:MountingHole") (at 209.55 15.24 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (uuid c48920e4-3b42-43e6-bb21-26a504d02180)
+    (property "Reference" "H17" (at 212.09 13.97 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Value" "ITX MountingHole" (at 212.09 16.51 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Footprint" "MountingHole:MountingHole_4.3mm_M4_Pad_Via" (at 209.55 15.24 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "~" (at 209.55 15.24 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project "jumpstarter"
+        (path "/5e49fb74-0a9b-4946-8b59-2b8244d10fd9"
+          (reference "H17") (unit 1)
+        )
+      )
+    )
+  )
+
   (symbol (lib_id "power:+3.3V") (at 50.8 68.58 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid c7538960-fcf0-451e-bba3-e6926d685d9b)
@@ -5542,6 +5566,30 @@
     )
   )
 
+  (symbol (lib_id "Mechanical:MountingHole") (at 238.76 15.24 0) (unit 1)
+    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (uuid d986ba71-35a1-4f35-a252-917143b571b9)
+    (property "Reference" "H18" (at 241.3 13.97 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Value" "ITX MountingHole" (at 241.3 16.51 0)
+      (effects (font (size 1.27 1.27)) (justify left))
+    )
+    (property "Footprint" "MountingHole:MountingHole_4.3mm_M4_Pad_Via" (at 238.76 15.24 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "~" (at 238.76 15.24 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project "jumpstarter"
+        (path "/5e49fb74-0a9b-4946-8b59-2b8244d10fd9"
+          (reference "H18") (unit 1)
+        )
+      )
+    )
+  )
+
   (symbol (lib_id "power:GND") (at 20.32 43.18 0) (unit 1)
     (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
     (uuid df4d0877-f385-4329-9266-ace26394ac4e)
@@ -5582,8 +5630,8 @@
     (property "Datasheet" "~" (at 36.83 27.94 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 39000bff-ab08-46e2-8b6e-8fcccd837c76))
-    (pin "2" (uuid 95dd7c1c-9241-4e9c-8e80-6fdd031d7512))
+    (pin "1" (uuid b1090bb8-5386-40b9-b875-35e0a83148ca))
+    (pin "2" (uuid c1c1cb61-0bba-4cbf-b718-7ac0a70bed16))
     (instances
       (project "jumpstarter"
         (path "/5e49fb74-0a9b-4946-8b59-2b8244d10fd9"

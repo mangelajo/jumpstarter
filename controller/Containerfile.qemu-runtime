@@ -2,6 +2,16 @@
 # Provides QEMU tools for running virtual machines as part of
 # the sidecar pattern (paired with the jumpstarter exporter).
 #
+# The exporter init container copies jumpstarter-exec to /shared/ before
+# this container starts. jumpstarter-exec runs in serve mode, accepting
+# remote command execution requests over a Unix socket.
+#
+# jumpstarter-exec emits JEP-0013-style JSON logs to stderr by default.
+# Persistent correlation fields (exporter, namespace, component, …) come from
+# JUMPSTARTER_EXEC_LOG_FIELDS / --log-field (injected by the provisioner).
+# Set JUMPSTARTER_EXEC_DEBUG=1 (or pass --debug) to also log I/O
+# previews for stdin/stdout/stderr of executed commands.
+#
 # Uses Fedora as the base image because QEMU packages are not
 # available in UBI-minimal repositories.
 FROM registry.fedoraproject.org/fedora-minimal:44
@@ -9,11 +19,14 @@ FROM registry.fedoraproject.org/fedora-minimal:44
 RUN dnf install --setopt=install_weak_deps=False -y \
         qemu-img \
         qemu-kvm \
+        qemu-system-aarch64 \
+        edk2-ovmf \
+        edk2-aarch64 \
         procps-ng \
         virtiofsd && \
     dnf clean all
 
 USER 65532:65532
 
-# No ENTRYPOINT — the exporter sidecar will manage QEMU
-# lifecycle via a launcher/wrapper on the shared volume.
+ENTRYPOINT ["/shared/jumpstarter-exec"]
+CMD ["serve", "--socket", "/shared/launcher.sock"]

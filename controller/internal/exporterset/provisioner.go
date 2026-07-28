@@ -30,17 +30,6 @@ import (
 // scaling orchestration generic while allowing each backend to
 // render Pods, manage external resources, and handle cleanup
 // differently.
-//
-// Future extensions may add methods for rendering supporting
-// resources that provisioned Pods depend on:
-//   - RenderSecrets: create Secrets (e.g. API credentials,
-//     TLS certs) injected into exporter or runtime containers.
-//   - RenderConfigMaps: create ConfigMaps (e.g. QEMU machine
-//     profiles, driver configuration) mounted into Pods.
-//
-// These are not part of the initial interface because the
-// reconciler can be extended to call them when needed without
-// breaking existing provisioner implementations.
 type Provisioner interface {
 	// Name returns the provisioner identifier
 	// (e.g. "qemu.jumpstarter.dev").
@@ -48,15 +37,29 @@ type Provisioner interface {
 
 	// RenderPod creates a Pod spec for a new exporter instance.
 	// The reconciler provides the ExporterSet, the resolved
-	// VirtualTargetClass, and the deep-merged parameters. The
-	// provisioner returns a Pod ready to create. The reconciler
-	// sets OwnerReferences on the Pod before creation.
+	// VirtualTargetClass, the deep-merged parameters, the merged
+	// image overrides, and the Exporter CR that owns this instance.
+	// The provisioner returns a Pod ready to create. The reconciler
+	// sets OwnerReferences and injects the config volume after
+	// RenderPod returns.
 	RenderPod(
 		ctx context.Context,
 		exporterSet *virtualtargetv1alpha1.ExporterSet,
 		vtc *virtualtargetv1alpha1.VirtualTargetClass,
 		mergedParameters map[string]interface{},
+		images *virtualtargetv1alpha1.ImageOverrides,
+		exporter *jumpstarterdevv1alpha1.Exporter,
 	) (*corev1.Pod, error)
+
+	// EnrichExporterExport allows a provisioner to inject or override
+	// driver configuration entries before the ExporterConfig is persisted.
+	// For example, the QEMU provisioner injects launcher_socket,
+	// default_partitions (firmware), hostfwd, and wrapper drivers.
+	// The returned slice replaces the original drivers list.
+	EnrichExporterExport(
+		drivers []virtualtargetv1alpha1.DriverConfig,
+		mergedParameters map[string]interface{},
+	) ([]virtualtargetv1alpha1.DriverConfig, error)
 
 	// Cleanup is called when an exporter instance is being
 	// removed. The provisioner can use this to clean up external

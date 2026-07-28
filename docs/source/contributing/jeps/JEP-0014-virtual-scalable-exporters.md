@@ -8,7 +8,7 @@
 | **Status**        | Approved                                                       |
 | **Type**          | Standards Track                                                |
 | **Created**       | 2026-06-03                                                     |
-| **Updated**       | 2026-06-18                                                     |
+| **Updated**       | 2026-07-28                                                     |
 | **Discussion**    | https://github.com/jumpstarter-dev/jumpstarter/issues/41       |
 | **Requires**      |                                                                |
 | **Supersedes**    |                                                                |
@@ -150,6 +150,11 @@ spec:
     resources:
       limits:
         devices.kubevirt.io/kvm: "1"
+  images:                            # optional; overrides default container images
+    exporter:
+      image: quay.io/jumpstarter-dev/jumpstarter:v0.9.0
+    runtime:
+      image: quay.io/jumpstarter-dev/virtual/qemu-runtime:v0.9.0
   parameters:                        # nested object; provisioner interprets
     machineType: virt
     firmware:
@@ -190,11 +195,14 @@ spec:
         virtual: "true"
     spec:
       drivers:
-        - type: jumpstarter_driver_power.driver.QemuPower
-        - type: jumpstarter_driver_network.driver.TcpNetwork
+        - name: qemu
+          type: jumpstarter_driver_qemu.driver.Qemu
+        - name: tcp
+          type: jumpstarter_driver_network.driver.TcpNetwork
           config:
             port: 22
-        - type: jumpstarter_driver_serial.driver.QemuSerial
+        - name: serial
+          type: jumpstarter_driver_serial.driver.QemuSerial
 status:
   replicas: 5
   readyReplicas: 3
@@ -260,8 +268,10 @@ spec:
         virtual: "true"
     spec:
       drivers:
-        - type: jumpstarter_driver_android.driver.AdbDriver
-        - type: jumpstarter_driver_power.driver.EmulatorPower
+        - name: adb
+          type: jumpstarter_driver_android.driver.AdbDriver
+        - name: power
+          type: jumpstarter_driver_power.driver.EmulatorPower
 ```
 
 An `ExporterSet` with `minAvailableReplicas: 0` consumes no resources until a
@@ -464,11 +474,14 @@ spec:
         virtual: "true"
     spec:
       drivers:
-        - type: jumpstarter_driver_power.driver.QemuPower
-        - type: jumpstarter_driver_network.driver.TcpNetwork
+        - name: qemu
+          type: jumpstarter_driver_qemu.driver.Qemu
+        - name: tcp
+          type: jumpstarter_driver_network.driver.TcpNetwork
           config:
             port: 22
-        - type: jumpstarter_driver_serial.driver.QemuSerial
+        - name: serial
+          type: jumpstarter_driver_serial.driver.QemuSerial
 ```
 
 **User actions:** None.
@@ -810,6 +823,13 @@ spec:
     resources:
       limits:
         devices.kubevirt.io/kvm: "1"
+  images:                            # optional; overrides default container images
+    exporter:                        # exporter sidecar image
+      image: <string>               # e.g. quay.io/jumpstarter-dev/jumpstarter:v0.9.0
+      imagePullPolicy: <Always|Never|IfNotPresent>
+    runtime:                         # provisioner-specific runtime image
+      image: <string>               # e.g. quay.io/jumpstarter-dev/virtual/qemu-runtime:v0.9.0
+      imagePullPolicy: <Always|Never|IfNotPresent>
 ```
 
 **ExporterSet (common fields):**
@@ -824,6 +844,13 @@ spec:
   virtualTargetClassName: <string>   # VirtualTargetClass name in same namespace
   parameters:                       # optional nested overrides (deep-merged with class)
     <key>: <nested value>
+  images:                           # optional; overrides VTC-level image defaults
+    exporter:
+      image: <string>
+      imagePullPolicy: <Always|Never|IfNotPresent>
+    runtime:
+      image: <string>
+      imagePullPolicy: <Always|Never|IfNotPresent>
   selector:
     matchLabels:
       <key>: <value>
@@ -831,8 +858,40 @@ spec:
     metadata:
       labels: { ... }
     spec:
-      drivers: [ ... ]
+      drivers:
+        - name: <string>             # required; key in ExporterConfig export map
+          type: <string>             # fully qualified Python driver class
+          config: { ... }            # driver-specific config (schemaless)
 ```
+
+### Image Overrides
+
+Both `VirtualTargetClass` and `ExporterSet` expose an `spec.images` field with
+typed sub-fields for overriding the default container images used by the
+provisioner:
+
+- **`images.exporter`** — the exporter sidecar container image.
+- **`images.runtime`** — the provisioner-specific runtime container image
+  (e.g. QEMU runtime for `qemu.jumpstarter.dev`).
+
+Each sub-field is an `ImageSpec` with:
+
+- **`image`** — container image reference (e.g. `quay.io/org/repo:tag`).
+- **`imagePullPolicy`** — `Always`, `Never`, or `IfNotPresent`.
+
+**Merge semantics:** ExporterSet-level images fully override VTC-level images
+at the `ImageSpec` level (not individual fields within an `ImageSpec`). If an
+ExporterSet specifies `images.runtime`, it replaces the entire VTC-level
+`images.runtime`; VTC-level `images.exporter` is still inherited if the
+ExporterSet does not specify one. When neither VTC nor ExporterSet specifies
+an image, the provisioner falls back to its built-in default image, resolved
+to the controller's build-time version.
+
+**Use cases:**
+
+- **Development clusters:** Override images to `:latest` for local testing.
+- **Air-gapped environments:** Point to an internal registry mirror.
+- **Version pinning:** Pin specific versions independent of the controller release.
 
 ### Dictionary-Based Parameters
 
@@ -1053,11 +1112,14 @@ spec:
         virtual: "true"
     spec:
       drivers:
-        - type: jumpstarter_driver_power.driver.QemuPower
-        - type: jumpstarter_driver_network.driver.TcpNetwork
+        - name: qemu
+          type: jumpstarter_driver_qemu.driver.Qemu
+        - name: tcp
+          type: jumpstarter_driver_network.driver.TcpNetwork
           config:
             port: 22
-        - type: jumpstarter_driver_serial.driver.QemuSerial
+        - name: serial
+          type: jumpstarter_driver_serial.driver.QemuSerial
 ```
 
 **Provisioner actions (off-cluster):**
@@ -1289,6 +1351,73 @@ Provisioning → Ready (warm pool) → Leased → Ready
 - **Ready:** Exporter registered and available for lease.
 - **Leased:** Exporter assigned to an active lease.
 - **Terminating:** Instance being deleted (scale-down or failure replace).
+
+### DriverConfig and ExporterConfig Generation
+
+Each driver entry in `ExporterSet.spec.template.spec.drivers` is a `DriverConfig`:
+
+```yaml
+drivers:
+  - name: qemu
+    type: jumpstarter_driver_qemu.driver.Qemu
+    config:
+      arch: x86_64
+      smp: 2
+      mem: 2G
+  - name: tcp
+    type: jumpstarter_driver_network.driver.TcpNetwork
+    config:
+      port: 2222
+```
+
+**`name` field:** A required string that becomes the key in the generated
+`ExporterConfig`'s `export:` map. Names must be unique across all driver
+entries in the same template. Explicit names allow the provisioner's
+enrichment logic to locate specific driver entries by name and ensure
+predictable export map keys.
+
+**Two-phase instance creation:** The reconciler creates each `Exporter` CR
+first (phase 1). Only after the Jumpstarter controller provisions credentials
+and an endpoint for the Exporter (populating `status.credential` and
+`status.endpoint`) does the reconciler generate the `ExporterConfig` Secret
+and create the Pod (phase 2). This ensures the config always contains valid
+connection details.
+
+**ExporterConfig generation:** The controller builds a complete `ExporterConfig`
+YAML containing:
+
+- **endpoint** — The controller's gRPC endpoint from `Exporter.status.endpoint`.
+- **token** — Retrieved from the Secret referenced by `Exporter.status.credential`.
+- **tls.ca** — Base64-encoded CA certificate from the `jumpstarter-service-ca-cert`
+  ConfigMap (cert-manager integration).
+- **export** — A map of driver name → `{type, config}` built from the template
+  drivers list, enriched by the provisioner.
+
+**Provisioner enrichment (`EnrichExporterExport`):** Before persisting the
+config, the provisioner may inject or override driver entries. For example,
+the `qemu.jumpstarter.dev` provisioner:
+
+- Injects `launcher_socket` pointing to the shared-volume Unix socket path.
+- Injects architecture-appropriate `default_partitions` (EDK2 firmware paths)
+  unless the user already specified them.
+- Injects `hostfwd` settings for SSH access unless already present.
+- Auto-injects a `tcp` wrapper driver if not already present.
+
+**Driver-name collision handling:** The `buildExportMap` function rejects
+duplicate keys in the export map. If two `DriverConfig` entries share the
+same `name`, the controller returns an error during config generation.
+
+**Pod naming:** The Pod created for each Exporter uses the Exporter's own name
+(`exporter.Name`) rather than a generated name. This 1:1 correspondence makes
+it straightforward to correlate Pods, Exporters, and their logs.
+
+**`exitOnLeaseEnd` derivation:** The `exitOnLeaseEnd` flag in the generated
+`ExporterConfig` is derived from `ExporterSet.spec.recycleStrategy`:
+
+- `ExitAndReplace` (default) → `exitOnLeaseEnd: true` — the exporter process
+  exits when its lease ends, causing the Pod to terminate and be replaced.
+- `InPlaceReuse` → `exitOnLeaseEnd: false` — the exporter stays running and
+  transitions back to available.
 
 ### Component Interaction
 
@@ -1564,6 +1693,19 @@ claim CRDs.
   provisioner model; added end-to-end flow section
 - 2026-06-18: Team review — dictionary `parameters`, removed typed VirtualTarget
   CRDs, namespaced `VirtualTargetClass`, deferred TTL (DD-7)
+- 2026-07-24: Added `name` field to `DriverConfig` for export map key naming;
+  documented two-phase instance creation (Exporter CR first, Pod after
+  credentials ready); added ExporterConfig injection with auto-enrichment
+  (firmware paths, hostfwd, wrapper drivers)
+- 2026-07-27: Added typed `ImageOverrides` on `VirtualTargetClass` and
+  `ExporterSet` for structured image/imagePullPolicy overrides with ExporterSet
+  taking precedence over VTC; replaces previous unstructured parameters approach
+- 2026-07-27: Documented driver-name collision rejection in `buildExportMap`,
+  Pod naming matching Exporter names, `exitOnLeaseEnd` derivation from
+  `recycleStrategy`, and provisioner enrichment precedence rules
+- 2026-07-28: Made `DriverConfig.name` mandatory (no longer derived from type);
+  removed `wait-for-binary.sh` script in favor of direct `jumpstarter-exec`
+  entrypoint in `qemu-runtime` container; updated all examples
 
 ## References
 

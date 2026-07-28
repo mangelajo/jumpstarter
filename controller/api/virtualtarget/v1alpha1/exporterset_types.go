@@ -33,6 +33,9 @@ const (
 
 // DriverConfig defines a single driver entry in an exporter template.
 type DriverConfig struct {
+	// Name is the key used in the ExporterConfig export map.
+	Name string `json:"name"`
+
 	// Type is the fully qualified Python driver class name.
 	Type string `json:"type"`
 
@@ -109,6 +112,11 @@ type ExporterSetSpec struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	Parameters *apiextensionsv1.JSON `json:"parameters,omitempty"`
+
+	// Images overrides the default container images used by the provisioner.
+	// These take precedence over VirtualTargetClass-level image settings.
+	// +optional
+	Images *ImageOverrides `json:"images,omitempty"`
 
 	// Selector defines the label selector for matching exporters owned by this set.
 	Selector metav1.LabelSelector `json:"selector"`

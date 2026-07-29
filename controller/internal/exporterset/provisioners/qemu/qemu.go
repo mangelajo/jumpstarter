@@ -30,6 +30,7 @@ import (
 
 	jumpstarterdevv1alpha1 "github.com/jumpstarter-dev/jumpstarter/controller/api/v1alpha1"
 	virtualtargetv1alpha1 "github.com/jumpstarter-dev/jumpstarter/controller/api/virtualtarget/v1alpha1"
+	"github.com/jumpstarter-dev/jumpstarter/controller/internal/exporterset/disk"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -154,7 +155,10 @@ func (p *Provisioner) resolveImageSpec(spec *virtualtargetv1alpha1.ImageSpec, de
 //     Kubernetes terminates sidecars and the Pod completes.
 //     Pod restartPolicy is Never so a clean exporter exit is not
 //     restarted in-place (ExporterSet replaces the instance instead).
-//   - Shared emptyDir for Unix sockets (QMP, serial, launcher) and disk.
+//   - Shared emptyDir for Unix sockets (QMP, serial, launcher).
+//   - Guest disk volume at /disk (ephemeral PVC when
+//     parameters.storage.storageClassName is set, otherwise sized
+//     emptyDir with ephemeral-storage requests/limits).
 //
 // The caller (reconciler) is responsible for setting
 // OwnerReferences on the Pod and injecting the config volume.
@@ -171,6 +175,11 @@ func (p *Provisioner) RenderPod(
 	runAsRoot := int64(0)
 	runAsExporter := exporterNonRootUID
 	exporterNonRoot := true
+
+	diskSize, err := disk.SizeFromParameters(mergedParameters)
+	if err != nil {
+		return nil, err
+	}
 
 	var exporterSpec, runtimeSpec *virtualtargetv1alpha1.ImageSpec
 	if images != nil {
@@ -192,6 +201,11 @@ func (p *Provisioner) RenderPod(
 				exporter.Name, exporter.Namespace,
 			),
 		})
+	}
+
+	diskMount := corev1.VolumeMount{
+		Name:      disk.VolumeName,
+		MountPath: disk.MountPath,
 	}
 
 	podMeta := metav1.ObjectMeta{
@@ -248,6 +262,7 @@ func (p *Provisioner) RenderPod(
 							Name:      sharedVolumeName,
 							MountPath: sharedMountPath,
 						},
+						diskMount,
 					},
 				},
 			},
@@ -275,6 +290,7 @@ func (p *Provisioner) RenderPod(
 							Name:      sharedVolumeName,
 							MountPath: sharedMountPath,
 						},
+						diskMount,
 					},
 				},
 			},
@@ -289,6 +305,11 @@ func (p *Provisioner) RenderPod(
 				},
 			},
 		},
+	}
+
+	storageClass := virtualtargetv1alpha1.EffectiveStorageClassName(vtc, exporterSet)
+	if err := attachDiskVolume(pod, exporter, storageClass, diskSize); err != nil {
+		return nil, err
 	}
 
 	// Apply scheduling from VirtualTargetClass.
@@ -311,7 +332,50 @@ func (p *Provisioner) RenderPod(
 		}
 	}
 
+	// emptyDir guest disks consume node ephemeral storage — ensure the
+	// scheduler and kubelet account for it on containers that mount /disk.
+	if storageClass == "" {
+		disk.SetEphemeralStorage(&pod.Spec.Containers[0].Resources, diskSize)
+		for i := range pod.Spec.InitContainers {
+			if pod.Spec.InitContainers[i].Name == "exporter" {
+				disk.SetEphemeralStorage(&pod.Spec.InitContainers[i].Resources, diskSize)
+			}
+		}
+	}
+
 	return pod, nil
+}
+
+// attachDiskVolume appends the guest disk volume. When storageClass is set,
+// the volume references a PVC that the reconciler creates; otherwise an
+// emptyDir sized to diskSize is used.
+func attachDiskVolume(
+	pod *corev1.Pod,
+	exporter *jumpstarterdevv1alpha1.Exporter,
+	storageClass string,
+	diskSize resource.Quantity,
+) error {
+	vol := corev1.Volume{Name: disk.VolumeName}
+	if storageClass != "" {
+		if exporter == nil {
+			return fmt.Errorf("disk PVC requires an Exporter to derive the claim name")
+		}
+		claimName := disk.PVCName(exporter.Name)
+		vol.VolumeSource = corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: claimName,
+			},
+		}
+	} else {
+		size := diskSize.DeepCopy()
+		vol.VolumeSource = corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: &size,
+			},
+		}
+	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, vol)
+	return nil
 }
 
 // EnrichExporterExport injects QEMU-specific driver configuration:

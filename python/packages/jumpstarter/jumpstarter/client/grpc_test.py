@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta
 from io import StringIO
 from unittest.mock import AsyncMock, Mock, patch
@@ -12,6 +13,7 @@ from jumpstarter.client.grpc import (
     Exporter,
     ExporterList,
     Lease,
+    LeaseList,
     WithOptions,
     add_display_columns,
     add_exporter_row,
@@ -652,6 +654,46 @@ class TestLeaseRichDisplay:
         # Should not crash with empty tags
         columns = [col.header for col in table.columns]
         assert "TAGS" in columns
+
+
+class TestLeaseListFilterBySelector:
+    def create_lease(self, name="test-lease", selector="board=rpi"):
+        return Lease(
+            namespace="default",
+            name=name,
+            selector=selector,
+            duration=timedelta(hours=1),
+            client="test-client",
+            exporter="test-exporter",
+            conditions=[],
+        )
+
+    def test_filter_keeps_matching_and_excludes_erroring_leases(self):
+        leases = LeaseList(
+            leases=[
+                self.create_lease(name="good", selector="board=rpi"),
+                self.create_lease(name="bad", selector="board=jetson"),
+            ],
+            next_page_token=None,
+        )
+        with patch(
+            "jumpstarter.client.grpc.selector_contains",
+            side_effect=[True, ValueError("unknown label selector operator: 'bogus'")],
+        ):
+            result = leases.filter_by_selector("board=rpi")
+        assert [lease.name for lease in result.leases] == ["good"]
+
+    def test_filter_warning_names_lease_filter_and_error(self, caplog):
+        leases = LeaseList(leases=[self.create_lease(name="bad", selector="board=jetson")], next_page_token=None)
+        with patch(
+            "jumpstarter.client.grpc.selector_contains",
+            side_effect=ValueError("unknown label selector operator: 'bogus'"),
+        ):
+            with caplog.at_level(logging.WARNING, logger="jumpstarter.client.grpc"):
+                leases.filter_by_selector("board in rpi")
+        assert "bad" in caplog.text
+        assert "board in rpi" in caplog.text
+        assert "unknown label selector operator: 'bogus'" in caplog.text
 
 
 @pytest.mark.asyncio

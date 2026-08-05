@@ -47,6 +47,20 @@ fn start_server_process() -> (Child, TempDir, String) {
     }
     assert!(sock.exists(), "server socket never appeared");
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&sock)
+            .expect("stat socket")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o666,
+            "listen socket must be world-accessible for cross-UID sidecar peers, got {mode:#o}"
+        );
+    }
+
     (child, dir, path)
 }
 
@@ -437,6 +451,99 @@ fn e2e_echo() {
     assert_eq!(code, 0);
     assert_eq!(stdout.trim(), "e2e works");
     server.kill().ok();
+}
+
+#[test]
+fn e2e_shutdown_exits_serve() {
+    let (mut server, _dir, sock) = start_server_process();
+
+    let status = Command::new(binary_path())
+        .args(["shutdown", "--socket", &sock])
+        .status()
+        .expect("failed to run jumpstarter-exec shutdown");
+    assert!(status.success(), "shutdown should exit 0");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match server.try_wait() {
+            Ok(Some(wait)) => {
+                assert!(
+                    wait.success(),
+                    "serve should exit 0 after shutdown, got {wait}"
+                );
+                return;
+            }
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = server.kill();
+                let _ = server.wait();
+                panic!("serve did not exit within 5s after shutdown");
+            }
+            Err(e) => panic!("try_wait failed: {e}"),
+        }
+    }
+}
+
+#[test]
+fn shutdown_sigterms_in_flight_exec() {
+    // Ensure Shutdown marks the lifecycle closed under the same lock used
+    // for child registration, then SIGTERMs tracked Exec children so they
+    // do not outlive serve (important when we are PID 1 in a container).
+    let (_dir, path) = start_server();
+    let stream = UnixStream::connect(&path).unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+
+    send(
+        &mut writer,
+        &ClientMessage::Exec {
+            argv: vec!["sleep".into(), "60".into()],
+            env: vec![],
+            cwd: None,
+        },
+    );
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let started: ServerMessage = serde_json::from_str(line.trim()).unwrap();
+    let pid = match started {
+        ServerMessage::Started { pid } => pid,
+        other => panic!("expected Started, got {other:?}"),
+    };
+    assert!(
+        unsafe { libc_kill(pid as i32, 0) } == 0,
+        "sleep child {pid} should be alive before shutdown"
+    );
+
+    let shutdown = UnixStream::connect(&path).unwrap();
+    let mut shutdown_writer = shutdown.try_clone().unwrap();
+    let mut shutdown_reader = BufReader::new(shutdown);
+    send(&mut shutdown_writer, &ClientMessage::Shutdown);
+    let msgs = read_messages(&mut shutdown_reader);
+    assert!(
+        msgs.iter()
+            .any(|m| matches!(m, ServerMessage::Exit { code: Some(0) })),
+        "shutdown should ack with Exit 0, got {msgs:?}"
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if unsafe { libc_kill(pid as i32, 0) } != 0 {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("exec child pid {pid} still alive 5s after shutdown");
+}
+
+/// Signal 0 probe without taking a dependency on nix.
+unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    kill(pid, sig)
 }
 
 #[test]

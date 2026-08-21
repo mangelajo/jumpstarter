@@ -52,6 +52,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.runs-on }}
+    env:
+      # renovate: datasource=custom.fedora-cloud-qcow2 depName=fedora-cloud-base-generic
+      FEDORA_CLOUD_VERSION: 43-1.6
     strategy:
       matrix:
         runs-on: ${{ fromJson(needs.changes.outputs.runners) }}
@@ -119,8 +122,12 @@ jobs:
 
       - name: Install Renode (Linux)
         if: runner.os == 'Linux'
+        env:
+          # renovate: datasource=github-releases depName=renode/renode
+          RENODE_VERSION: v1.16.1
         run: |
-          wget https://github.com/renode/renode/releases/download/v1.16.1/renode_1.16.1_amd64.deb -O /tmp/renode.deb
+          RENODE_TAG="${RENODE_VERSION#v}"
+          wget "https://github.com/renode/renode/releases/download/${RENODE_VERSION}/renode_${RENODE_TAG}_amd64.deb" -O /tmp/renode.deb
           sudo apt-get install -y /tmp/renode.deb
 
       - name: Install Qemu (macOS)
@@ -145,14 +152,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: python/packages/jumpstarter-driver-qemu/images
-          key: fedora-cloud-43-1.6
+          key: fedora-cloud-${{ env.FEDORA_CLOUD_VERSION }}
 
       - name: Download Fedora Cloud images
         if: steps.cache-fedora-cloud-images.outputs.cache-hit != 'true'
         run: |
+          FEDORA_RELEASE="${FEDORA_CLOUD_VERSION%%-*}"
           for arch in aarch64 x86_64; do
-            curl -L --fail --output "python/packages/jumpstarter-driver-qemu/images/Fedora-Cloud-Base-Generic-43-1.6.${arch}.qcow2" \
-              "https://iad.mirror.rackspace.com/fedora/releases/43/Cloud/${arch}/images/Fedora-Cloud-Base-Generic-43-1.6.${arch}.qcow2"
+            curl -L --fail --output "python/packages/jumpstarter-driver-qemu/images/Fedora-Cloud-Base-Generic-${FEDORA_CLOUD_VERSION}.${arch}.qcow2" \
+              "https://iad.mirror.rackspace.com/fedora/releases/${FEDORA_RELEASE}/Cloud/${arch}/images/Fedora-Cloud-Base-Generic-${FEDORA_CLOUD_VERSION}.${arch}.qcow2"
           done
 
       - name: Run pytest

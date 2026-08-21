@@ -56,6 +56,7 @@ Drivers that control storage devices and manage data:
 Drivers that handle media streams:
 
 - {doc}`uStreamer <ustreamer>` (`jumpstarter-driver-ustreamer`) - Video streaming
+- {doc}`Video <video>` (`jumpstarter-driver-video`) - Video interface and HTTP/MJPEG camera sources
 
 ### Automotive Diagnostics
 
@@ -145,6 +146,7 @@ uds.md
 uds-can.md
 uds-doip.md
 ustreamer.md
+video.md
 vnc.md
 xcp.md
 yepkit.md

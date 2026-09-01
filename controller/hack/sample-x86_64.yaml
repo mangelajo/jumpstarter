@@ -8,9 +8,11 @@
 #   - A VirtualTargetClass for x86_64 QEMU VMs with KVM acceleration
 #   - An ExporterSet that manages a pool of virtual exporters
 #
-# Guest disk: omit storageClassName to use emptyDir (with ephemeral-storage
-# accounting), or set storageClassName to provision a per-exporter PVC
-# mounted at /disk. ExporterSet.spec.storageClassName overrides the class.
+# Guest disk: sized emptyDir at /disk from parameters.resources.storage
+# (with ephemeral-storage accounting). To use a StorageClass, set
+# parameters.storage.storageClassName — the provisioner renders a generic
+# ephemeral PVC whose lifetime follows the Pod (ExitAndReplace).
+# ExporterSet.spec.parameters.storage deep-merges over the class.
 ---
 apiVersion: virtualtarget.jumpstarter.dev/v1alpha1
 kind: VirtualTargetClass
@@ -21,7 +23,6 @@ spec:
   provisioner: qemu.jumpstarter.dev
   bindingMode: Immediate
   reclaimPolicy: Delete
-  # storageClassName: "your-storage-class"  # optional; omit → emptyDir
   scheduling:
     nodeSelector:
       kubernetes.io/arch: amd64
@@ -42,6 +43,9 @@ spec:
       cpu: 2
       memory: 2Gi
       storage: 20Gi
+    # storage:
+    #   storageClassName: "your-storage-class"
+    #   accessModes: ["ReadWriteOnce"]
 ---
 apiVersion: virtualtarget.jumpstarter.dev/v1alpha1
 kind: ExporterSet
@@ -55,7 +59,9 @@ spec:
   scaleDownCooldown: 5m
   recycleStrategy: ExitAndReplace
   virtualTargetClassName: qemu-x86-64
-  # storageClassName: "override-sc"  # optional override ("" forces emptyDir)
+  # parameters:
+  #   storage:
+  #     storageClassName: "override-sc"  # override class; "" forces emptyDir
   selector:
     matchLabels:
       board: x86-64-virtual

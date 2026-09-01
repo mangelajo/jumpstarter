@@ -23,36 +23,102 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func TestPVCName(t *testing.T) {
-	if got := PVCName("exp-1"); got != "disk-exp-1" {
-		t.Errorf("PVCName() = %q, want disk-exp-1", got)
-	}
-}
-
-func TestSizeFromParameters(t *testing.T) {
-	qty, err := SizeFromParameters(nil)
+func TestFromParameters_defaults(t *testing.T) {
+	spec, err := FromParameters(nil)
 	if err != nil {
 		t.Fatalf("nil params: %v", err)
 	}
-	if !qty.Equal(resource.MustParse(DefaultSize)) {
-		t.Errorf("default = %v, want %s", qty, DefaultSize)
+	if !spec.Size.Equal(resource.MustParse(DefaultSize)) {
+		t.Errorf("size = %v, want %s", spec.Size, DefaultSize)
 	}
+	if spec.UsePVC() {
+		t.Error("expected emptyDir when storageClassName is unset")
+	}
+	if len(spec.AccessModes) != 1 || spec.AccessModes[0] != corev1.ReadWriteOnce {
+		t.Errorf("accessModes = %v, want [ReadWriteOnce]", spec.AccessModes)
+	}
+}
 
-	qty, err = SizeFromParameters(map[string]interface{}{
+func TestFromParameters_storageClassAndSize(t *testing.T) {
+	spec, err := FromParameters(map[string]interface{}{
 		"resources": map[string]interface{}{"storage": "15Gi"},
+		"storage": map[string]interface{}{
+			"storageClassName": "gp3",
+			"accessModes":      []interface{}{"ReadWriteOnce", "ReadWriteMany"},
+		},
 	})
 	if err != nil {
-		t.Fatalf("15Gi: %v", err)
+		t.Fatalf("FromParameters: %v", err)
 	}
-	if !qty.Equal(resource.MustParse("15Gi")) {
-		t.Errorf("got %v, want 15Gi", qty)
+	if !spec.Size.Equal(resource.MustParse("15Gi")) {
+		t.Errorf("size = %v, want 15Gi", spec.Size)
 	}
+	if spec.StorageClassName != "gp3" {
+		t.Errorf("storageClassName = %q, want gp3", spec.StorageClassName)
+	}
+	if !spec.UsePVC() {
+		t.Error("expected PVC when storageClassName is set")
+	}
+	if len(spec.AccessModes) != 2 {
+		t.Fatalf("accessModes = %v", spec.AccessModes)
+	}
+}
 
-	_, err = SizeFromParameters(map[string]interface{}{
+func TestFromParameters_emptyStorageClassForcesEmptyDir(t *testing.T) {
+	spec, err := FromParameters(map[string]interface{}{
+		"storage": map[string]interface{}{
+			"storageClassName": "",
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromParameters: %v", err)
+	}
+	if spec.UsePVC() {
+		t.Error("empty storageClassName should force emptyDir")
+	}
+}
+
+func TestFromParameters_rejectsNumericStorage(t *testing.T) {
+	_, err := FromParameters(map[string]interface{}{
 		"resources": map[string]interface{}{"storage": 10.0},
 	})
 	if err == nil {
 		t.Fatal("expected error for numeric storage")
+	}
+}
+
+func TestVolume_emptyDir(t *testing.T) {
+	spec := Spec{Size: resource.MustParse("7Gi")}
+	vol := Volume(spec)
+	if vol.Name != VolumeName {
+		t.Errorf("name = %q, want %s", vol.Name, VolumeName)
+	}
+	if vol.EmptyDir == nil || vol.EmptyDir.SizeLimit == nil {
+		t.Fatalf("expected sized emptyDir, got %#v", vol)
+	}
+	if !vol.EmptyDir.SizeLimit.Equal(spec.Size) {
+		t.Errorf("SizeLimit = %v, want %v", vol.EmptyDir.SizeLimit, spec.Size)
+	}
+}
+
+func TestVolume_ephemeralPVC(t *testing.T) {
+	sc := "fast-ssd"
+	spec := Spec{
+		Size:             resource.MustParse("20Gi"),
+		StorageClassName: sc,
+		AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+	}
+	vol := Volume(spec)
+	if vol.Ephemeral == nil || vol.Ephemeral.VolumeClaimTemplate == nil {
+		t.Fatalf("expected ephemeral volumeClaimTemplate, got %#v", vol)
+	}
+	claim := vol.Ephemeral.VolumeClaimTemplate.Spec
+	if claim.StorageClassName == nil || *claim.StorageClassName != sc {
+		t.Errorf("StorageClassName = %v, want %s", claim.StorageClassName, sc)
+	}
+	got := claim.Resources.Requests[corev1.ResourceStorage]
+	if !got.Equal(spec.Size) {
+		t.Errorf("storage request = %v, want %v", got, spec.Size)
 	}
 }
 
@@ -74,7 +140,6 @@ func TestSetEphemeralStorage(t *testing.T) {
 		t.Error("cpu request should be preserved")
 	}
 
-	// Does not overwrite existing ephemeral-storage.
 	custom := resource.MustParse("1Gi")
 	res.Requests[corev1.ResourceEphemeralStorage] = custom
 	SetEphemeralStorage(&res, size)

@@ -496,7 +496,12 @@ class Qemu(Driver):
     def _disk_dir(self) -> str:
         """Directory for flashable guest disk images (root, bios, …)."""
         if self.launcher_socket:
-            return "/disk"
+            work = Path(self._work_dir)
+            # Production sidecar: sockets on /shared, guest disk on /disk.
+            # Tests use a tmp shared dir — keep disks next to sockets.
+            if work == Path("/shared"):
+                return "/disk"
+            return str(work)
         return self._tmp_dir.name
 
     @property

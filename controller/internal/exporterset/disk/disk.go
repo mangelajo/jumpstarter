@@ -15,7 +15,20 @@ limitations under the License.
 */
 
 // Package disk provides shared helpers for guest-disk volume provisioning
-// used by ExporterSet provisioners and the reconciler.
+// used by ExporterSet provisioners.
+//
+// Size comes from parameters.resources.storage (JEP-0014). Kubernetes
+// backend config comes from parameters.storage:
+//
+//	parameters:
+//	  resources:
+//	    storage: 20Gi
+//	  storage:
+//	    storageClassName: gp3   # omit or "" → sized emptyDir
+//	    accessModes: ["ReadWriteOnce"]
+//
+// When storageClassName is set, the volume is a generic ephemeral PVC
+// (volumeClaimTemplate) so its lifetime follows the Pod (ExitAndReplace).
 package disk
 
 import (
@@ -23,7 +36,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -35,13 +47,67 @@ const (
 
 	// DefaultSize is used when parameters.resources.storage is unset.
 	DefaultSize = "10Gi"
-
-	pvcNamePrefix = "disk-"
 )
 
-// PVCName returns the per-exporter PersistentVolumeClaim name.
-func PVCName(exporterName string) string {
-	return pvcNamePrefix + exporterName
+// Spec is the resolved guest-disk volume configuration.
+type Spec struct {
+	Size             resource.Quantity
+	StorageClassName string
+	AccessModes      []corev1.PersistentVolumeAccessMode
+}
+
+// UsePVC reports whether the disk is backed by an ephemeral PVC.
+func (s Spec) UsePVC() bool {
+	return s.StorageClassName != ""
+}
+
+// Mount returns the VolumeMount for /disk.
+func Mount() corev1.VolumeMount {
+	return corev1.VolumeMount{
+		Name:      VolumeName,
+		MountPath: MountPath,
+	}
+}
+
+// FromParameters reads disk size and optional storage backend from merged
+// ExporterSet/VirtualTargetClass parameters.
+func FromParameters(params map[string]interface{}) (Spec, error) {
+	size, err := SizeFromParameters(params)
+	if err != nil {
+		return Spec{}, err
+	}
+	spec := Spec{
+		Size:        size,
+		AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+	}
+	if params == nil {
+		return spec, nil
+	}
+	storage, ok := params["storage"].(map[string]interface{})
+	if !ok {
+		if params["storage"] != nil {
+			return Spec{}, fmt.Errorf("parameters.storage must be an object, got %T", params["storage"])
+		}
+		return spec, nil
+	}
+
+	switch v := storage["storageClassName"].(type) {
+	case string:
+		spec.StorageClassName = v
+	case nil:
+		// omit → emptyDir
+	default:
+		return Spec{}, fmt.Errorf("parameters.storage.storageClassName must be a string, got %T", v)
+	}
+
+	if raw, exists := storage["accessModes"]; exists && raw != nil {
+		modes, err := parseAccessModes(raw)
+		if err != nil {
+			return Spec{}, err
+		}
+		spec.AccessModes = modes
+	}
+	return spec, nil
 }
 
 // SizeFromParameters reads parameters.resources.storage, defaulting to DefaultSize.
@@ -55,8 +121,6 @@ func SizeFromParameters(params map[string]interface{}) (resource.Quantity, error
 					raw = v
 				}
 			case float64:
-				// JSON numbers land as float64; treat as Gi if unitless is awkward —
-				// require string quantities in the API.
 				return resource.Quantity{}, fmt.Errorf("parameters.resources.storage must be a string quantity (e.g. \"10Gi\"), got number %v", v)
 			case nil:
 				// use default
@@ -73,26 +137,35 @@ func SizeFromParameters(params map[string]interface{}) (resource.Quantity, error
 	return qty, nil
 }
 
-// BuildPVC constructs a guest-disk PVC owned by the given exporter metadata.
-func BuildPVC(namespace, exporterName, storageClassName string, size resource.Quantity, labels map[string]string) *corev1.PersistentVolumeClaim {
-	return &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      PVCName(exporterName),
-			Namespace: namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-			StorageClassName: &storageClassName,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: size,
+// Volume builds the guest-disk Pod volume from spec.
+func Volume(spec Spec) corev1.Volume {
+	vol := corev1.Volume{Name: VolumeName}
+	if spec.UsePVC() {
+		sc := spec.StorageClassName
+		vol.VolumeSource = corev1.VolumeSource{
+			Ephemeral: &corev1.EphemeralVolumeSource{
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes:      spec.AccessModes,
+						StorageClassName: &sc,
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: spec.Size,
+							},
+						},
+					},
 				},
 			},
+		}
+		return vol
+	}
+	size := spec.Size.DeepCopy()
+	vol.VolumeSource = corev1.VolumeSource{
+		EmptyDir: &corev1.EmptyDirVolumeSource{
+			SizeLimit: &size,
 		},
 	}
+	return vol
 }
 
 // SetEphemeralStorage ensures requests and limits include ephemeral-storage
@@ -111,4 +184,23 @@ func SetEphemeralStorage(resources *corev1.ResourceRequirements, size resource.Q
 	if _, ok := resources.Limits[corev1.ResourceEphemeralStorage]; !ok {
 		resources.Limits[corev1.ResourceEphemeralStorage] = size.DeepCopy()
 	}
+}
+
+func parseAccessModes(v interface{}) ([]corev1.PersistentVolumeAccessMode, error) {
+	items, ok := v.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("parameters.storage.accessModes must be a list of strings, got %T", v)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("parameters.storage.accessModes must not be empty")
+	}
+	out := make([]corev1.PersistentVolumeAccessMode, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok || s == "" {
+			return nil, fmt.Errorf("parameters.storage.accessModes must be a list of strings, got %T", item)
+		}
+		out = append(out, corev1.PersistentVolumeAccessMode(s))
+	}
+	return out, nil
 }

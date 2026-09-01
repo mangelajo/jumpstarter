@@ -9,10 +9,10 @@
 # but much slower than a real x86_64+KVM cluster.
 #
 # Guest disk uses emptyDir sized from parameters.resources.storage (no
-# storageClassName). The provisioner also sets ephemeral-storage
-# requests/limits so the scheduler accounts for local disk. To use a
-# PVC instead, set spec.storageClassName on the VirtualTargetClass or
-# override it on the ExporterSet.
+# parameters.storage.storageClassName). The provisioner also sets
+# ephemeral-storage requests/limits so the scheduler accounts for local
+# disk. To use a PVC instead, set parameters.storage.storageClassName
+# on the VirtualTargetClass (ExporterSet parameters deep-merge over it).
 #
 # For real deployments with KVM acceleration, use sample-x86_64.yaml
 # on a cluster that exposes /dev/kvm via the kubevirt device plugin

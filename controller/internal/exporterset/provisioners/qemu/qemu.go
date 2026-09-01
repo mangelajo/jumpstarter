@@ -176,7 +176,7 @@ func (p *Provisioner) RenderPod(
 	runAsExporter := exporterNonRootUID
 	exporterNonRoot := true
 
-	diskSize, err := disk.SizeFromParameters(mergedParameters)
+	diskSpec, err := disk.FromParameters(mergedParameters)
 	if err != nil {
 		return nil, err
 	}
@@ -203,10 +203,7 @@ func (p *Provisioner) RenderPod(
 		})
 	}
 
-	diskMount := corev1.VolumeMount{
-		Name:      disk.VolumeName,
-		MountPath: disk.MountPath,
-	}
+	diskMount := disk.Mount()
 
 	podMeta := metav1.ObjectMeta{
 		Namespace:   exporterSet.Namespace,
@@ -307,10 +304,7 @@ func (p *Provisioner) RenderPod(
 		},
 	}
 
-	storageClass := virtualtargetv1alpha1.EffectiveStorageClassName(vtc, exporterSet)
-	if err := attachDiskVolume(pod, exporter, storageClass, diskSize); err != nil {
-		return nil, err
-	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, disk.Volume(diskSpec))
 
 	// Apply scheduling from VirtualTargetClass.
 	// Clone maps and slices to avoid mutating the VTC's fields.
@@ -332,50 +326,24 @@ func (p *Provisioner) RenderPod(
 		}
 	}
 
-	// emptyDir guest disks consume node ephemeral storage — ensure the
-	// scheduler and kubelet account for it on containers that mount /disk.
-	if storageClass == "" {
-		disk.SetEphemeralStorage(&pod.Spec.Containers[0].Resources, diskSize)
+	if diskSpec.UsePVC() {
+		// fsGroup so the non-root exporter can write the ephemeral claim.
+		if pod.Spec.SecurityContext == nil {
+			pod.Spec.SecurityContext = &corev1.PodSecurityContext{}
+		}
+		pod.Spec.SecurityContext.FSGroup = &runAsExporter
+	} else {
+		// emptyDir guest disks consume node ephemeral storage — ensure the
+		// scheduler and kubelet account for it on containers that mount /disk.
+		disk.SetEphemeralStorage(&pod.Spec.Containers[0].Resources, diskSpec.Size)
 		for i := range pod.Spec.InitContainers {
-			if pod.Spec.InitContainers[i].Name == "exporter" {
-				disk.SetEphemeralStorage(&pod.Spec.InitContainers[i].Resources, diskSize)
+			if pod.Spec.InitContainers[i].Name == runtimeContainerName {
+				disk.SetEphemeralStorage(&pod.Spec.InitContainers[i].Resources, diskSpec.Size)
 			}
 		}
 	}
 
 	return pod, nil
-}
-
-// attachDiskVolume appends the guest disk volume. When storageClass is set,
-// the volume references a PVC that the reconciler creates; otherwise an
-// emptyDir sized to diskSize is used.
-func attachDiskVolume(
-	pod *corev1.Pod,
-	exporter *jumpstarterdevv1alpha1.Exporter,
-	storageClass string,
-	diskSize resource.Quantity,
-) error {
-	vol := corev1.Volume{Name: disk.VolumeName}
-	if storageClass != "" {
-		if exporter == nil {
-			return fmt.Errorf("disk PVC requires an Exporter to derive the claim name")
-		}
-		claimName := disk.PVCName(exporter.Name)
-		vol.VolumeSource = corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: claimName,
-			},
-		}
-	} else {
-		size := diskSize.DeepCopy()
-		vol.VolumeSource = corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{
-				SizeLimit: &size,
-			},
-		}
-	}
-	pod.Spec.Volumes = append(pod.Spec.Volumes, vol)
-	return nil
 }
 
 // EnrichExporterExport injects QEMU-specific driver configuration:

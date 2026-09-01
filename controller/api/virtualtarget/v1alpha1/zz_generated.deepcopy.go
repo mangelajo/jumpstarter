@@ -168,11 +168,6 @@ func (in *ExporterSetSpec) DeepCopyInto(out *ExporterSetSpec) {
 		*out = new(ImageOverrides)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.StorageClassName != nil {
-		in, out := &in.StorageClassName, &out.StorageClassName
-		*out = new(string)
-		**out = **in
-	}
 	in.Selector.DeepCopyInto(&out.Selector)
 	in.Template.DeepCopyInto(&out.Template)
 }

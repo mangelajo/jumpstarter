@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -171,9 +171,9 @@ class TestExporterStatusIconDelegation:
         assert columns[0] == "NAME"
         assert columns[1] == " "
 
-        console = Console(file=StringIO(), width=80)
+        console = Console(file=(buf := StringIO()), width=80)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "🟢" in output
         assert "my-exporter" in output
 
@@ -185,9 +185,9 @@ class TestExporterStatusIconDelegation:
         Exporter.rich_add_columns(table)
         exporter.rich_add_rows(table)
 
-        console = Console(file=StringIO(), width=80)
+        console = Console(file=(buf := StringIO()), width=80)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "+" in output
         assert "my-exporter" in output
 
@@ -206,9 +206,9 @@ class TestExporterStatusIconDelegation:
         assert " " not in columns
         assert "STATUS" in columns
 
-        console = Console(file=StringIO(), width=80)
+        console = Console(file=(buf := StringIO()), width=80)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "AVAILABLE" in output
         assert "my-exporter" in output
 
@@ -218,7 +218,7 @@ class TestExporterList:
         self,
         client="test-client",
         status="Active",
-        effective_begin_time=datetime(2023, 1, 1, 10, 0, 0),
+        effective_begin_time=datetime(2023, 1, 1, 10, 0, 0, tzinfo=UTC),
         effective_duration=timedelta(hours=1),
         begin_time=None,
         duration=timedelta(hours=1),
@@ -273,9 +273,9 @@ class TestExporterList:
         assert len(table.columns) == 6  # NAME, icon, LABELS, LEASED BY, LEASE STATUS, RELEASE TIME
 
         # Test actual table content by rendering it
-        console = Console(file=StringIO(), width=120)
+        console = Console(file=(buf := StringIO()), width=120)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
 
         # Check that the actual content is present in the rendered output
         assert "test-exporter" in output
@@ -296,9 +296,9 @@ class TestExporterList:
         assert len(table.columns) == 6  # NAME, icon, LABELS, LEASED BY, LEASE STATUS, RELEASE TIME
 
         # Test actual table content by rendering it
-        console = Console(file=StringIO(), width=120)
+        console = Console(file=(buf := StringIO()), width=120)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
 
         # Check that the actual content shows "Available" status
         assert "test-exporter" in output
@@ -328,9 +328,9 @@ class TestExporterList:
         assert len(table.columns) == 4  # NAME, icon, ONLINE, LABELS
 
         # Test actual table content by rendering it
-        console = Console(file=StringIO(), width=120)
+        console = Console(file=(buf := StringIO()), width=120)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
 
         # Check that the actual content shows correct online status indicators
         assert "online-exporter" in output
@@ -366,9 +366,9 @@ class TestExporterList:
         assert len(table.columns) == 7  # NAME, icon, ONLINE, LABELS, LEASED BY, LEASE STATUS, RELEASE TIME
 
         # Test actual table content by rendering it
-        console = Console(file=StringIO(), width=150)
+        console = Console(file=(buf := StringIO()), width=150)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
 
         # Verify all content is present
         assert "online-with-lease" in output
@@ -387,7 +387,7 @@ class TestExporterList:
         lease = self.create_test_lease(
             client="my-client",
             status="Expired",
-            effective_end_time=datetime(2023, 1, 1, 11, 0, 0),  # Ended after 1 hour
+            effective_end_time=datetime(2023, 1, 1, 11, 0, 0, tzinfo=UTC),  # Ended after 1 hour
         )
         exporter = Exporter(
             namespace="default", name="test-exporter", labels={"type": "device"}, online=True, lease=lease
@@ -447,7 +447,7 @@ class TestExporterList:
             status="Scheduled",
             effective_begin_time=None,  # Not started yet
             effective_duration=None,  # Not started yet
-            begin_time=datetime(2023, 1, 1, 10, 0, 0),
+            begin_time=datetime(2023, 1, 1, 10, 0, 0, tzinfo=UTC),
             duration=timedelta(hours=1),
         )
         exporter = Exporter(
@@ -465,9 +465,9 @@ class TestExporterList:
         assert len(table.rows) == 1
 
         # Test actual table content by rendering it
-        console = Console(file=StringIO(), width=120)
+        console = Console(file=(buf := StringIO()), width=120)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
 
         # Verify the scheduled lease displays expected release time
         assert "test-exporter" in output
@@ -644,82 +644,82 @@ class TestLeaseRichDisplay:
 
     def test_compute_expires_at_from_effective_end_time(self):
         lease = self.create_lease(
-            effective_end_time=datetime(2023, 1, 1, 11, 0, 0),
+            effective_end_time=datetime(2023, 1, 1, 11, 0, 0, tzinfo=UTC),
         )
-        assert lease._compute_expires_at() == datetime(2023, 1, 1, 11, 0, 0)
+        assert lease._compute_expires_at() == datetime(2023, 1, 1, 11, 0, 0, tzinfo=UTC)
 
     def test_compute_expires_at_from_effective_begin_and_duration(self):
         lease = self.create_lease(
-            effective_begin_time=datetime(2023, 6, 15, 14, 30, 0),
+            effective_begin_time=datetime(2023, 6, 15, 14, 30, 0, tzinfo=UTC),
             duration=timedelta(hours=2),
         )
-        assert lease._compute_expires_at() == datetime(2023, 6, 15, 16, 30, 0)
+        assert lease._compute_expires_at() == datetime(2023, 6, 15, 16, 30, 0, tzinfo=UTC)
 
     def test_compute_expires_at_from_begin_time_and_duration(self):
         lease = self.create_lease(
-            begin_time=datetime(2023, 3, 10, 8, 0, 0),
+            begin_time=datetime(2023, 3, 10, 8, 0, 0, tzinfo=UTC),
             duration=timedelta(minutes=30),
         )
-        assert lease._compute_expires_at() == datetime(2023, 3, 10, 8, 30, 0)
+        assert lease._compute_expires_at() == datetime(2023, 3, 10, 8, 30, 0, tzinfo=UTC)
 
     def test_compute_expires_at_none_when_no_begin_time(self):
         lease = self.create_lease()
         assert lease._compute_expires_at() is None
 
     def test_format_remaining_expired(self):
-        past = datetime(2020, 1, 1, 0, 0, 0)
+        past = datetime(2020, 1, 1, 0, 0, 0, tzinfo=UTC)
         assert Lease._format_remaining(past) == "expired"
 
     def test_format_remaining_none(self):
         assert Lease._format_remaining(None) == ""
 
     def test_format_remaining_days_hours_minutes(self):
-        now = datetime(2023, 1, 1, 0, 0, 0)
-        expires_at = datetime(2023, 1, 3, 3, 45, 0)
+        now = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
+        expires_at = datetime(2023, 1, 3, 3, 45, 0, tzinfo=UTC)
         with patch("jumpstarter.client.grpc.datetime", wraps=datetime) as mock_dt:
             mock_dt.now.return_value = now
             assert Lease._format_remaining(expires_at) == "2d 3h 45m"
 
     def test_format_remaining_hours_and_minutes(self):
-        now = datetime(2023, 1, 1, 0, 0, 0)
-        expires_at = datetime(2023, 1, 1, 5, 30, 0)
+        now = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
+        expires_at = datetime(2023, 1, 1, 5, 30, 0, tzinfo=UTC)
         with patch("jumpstarter.client.grpc.datetime", wraps=datetime) as mock_dt:
             mock_dt.now.return_value = now
             assert Lease._format_remaining(expires_at) == "5h 30m"
 
     def test_format_remaining_minutes_only(self):
-        now = datetime(2023, 1, 1, 0, 0, 0)
-        expires_at = datetime(2023, 1, 1, 0, 15, 0)
+        now = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
+        expires_at = datetime(2023, 1, 1, 0, 15, 0, tzinfo=UTC)
         with patch("jumpstarter.client.grpc.datetime", wraps=datetime) as mock_dt:
             mock_dt.now.return_value = now
             assert Lease._format_remaining(expires_at) == "15m"
 
     def test_format_remaining_zero_minutes_shows_0m(self):
-        now = datetime(2023, 1, 1, 0, 0, 0)
-        expires_at = datetime(2023, 1, 1, 0, 0, 30)
+        now = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
+        expires_at = datetime(2023, 1, 1, 0, 0, 30, tzinfo=UTC)
         with patch("jumpstarter.client.grpc.datetime", wraps=datetime) as mock_dt:
             mock_dt.now.return_value = now
             assert Lease._format_remaining(expires_at) == "0m"
 
     def test_format_remaining_days_only(self):
-        now = datetime(2023, 1, 1, 0, 0, 0)
-        expires_at = datetime(2023, 1, 4, 0, 0, 0)
+        now = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
+        expires_at = datetime(2023, 1, 4, 0, 0, 0, tzinfo=UTC)
         with patch("jumpstarter.client.grpc.datetime", wraps=datetime) as mock_dt:
             mock_dt.now.return_value = now
             assert Lease._format_remaining(expires_at) == "3d"
 
     def test_rich_add_rows_shows_expires_at(self):
         lease = self.create_lease(
-            effective_begin_time=datetime(2023, 1, 1, 10, 0, 0),
-            effective_end_time=datetime(2023, 1, 1, 11, 0, 0),
+            effective_begin_time=datetime(2023, 1, 1, 10, 0, 0, tzinfo=UTC),
+            effective_end_time=datetime(2023, 1, 1, 11, 0, 0, tzinfo=UTC),
         )
         table = Table()
         Lease.rich_add_columns(table)
         lease.rich_add_rows(table)
 
-        console = Console(file=StringIO(), width=200)
+        console = Console(file=(buf := StringIO()), width=200)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "2023-01-01 11:00:00" in output
 
     def test_rich_add_rows_empty_when_no_timing_data(self):
@@ -728,9 +728,9 @@ class TestLeaseRichDisplay:
         Lease.rich_add_columns(table)
         lease.rich_add_rows(table)
 
-        console = Console(file=StringIO(), width=200)
+        console = Console(file=(buf := StringIO()), width=200)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "test-lease" in output
         assert "test-client" in output
 
@@ -740,9 +740,9 @@ class TestLeaseRichDisplay:
         table = Table()
         Lease.rich_add_columns(table)
         lease.rich_add_rows(table)
-        console = Console(file=StringIO(), force_terminal=True)
+        console = Console(file=(buf := StringIO()), force_terminal=True)
         console.print(table)
-        output = console.file.getvalue()
+        output = buf.getvalue()
         assert "team=devops" in output
         assert "ci-job=12345" in output
 
@@ -788,9 +788,8 @@ class TestLeaseListFilterBySelector:
         with patch(
             "jumpstarter.client.grpc.selector_contains",
             side_effect=ValueError("unknown label selector operator: 'bogus'"),
-        ):
-            with caplog.at_level(logging.WARNING, logger="jumpstarter.client.grpc"):
-                leases.filter_by_selector("board in rpi")
+        ), caplog.at_level(logging.WARNING, logger="jumpstarter.client.grpc"):
+            leases.filter_by_selector("board in rpi")
         assert "bad" in caplog.text
         assert "board in rpi" in caplog.text
         assert "unknown label selector operator: 'bogus'" in caplog.text

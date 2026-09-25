@@ -239,37 +239,36 @@ def test_driver_mock_storage_mux_flasher_http_auto_decompress(tmp_path):
 
 
 def test_drivers_mock_storage_mux_fs(monkeypatch: pytest.MonkeyPatch):
-    with serve(MockStorageMux()) as client:
-        with TemporaryDirectory() as tempdir:
-            # original file on the client to be pushed to the exporter
-            original = Path(tempdir) / "original"
-            # new file read back from the exporter to the client
-            readback = Path(tempdir) / "readback"
+    with serve(MockStorageMux()) as client, TemporaryDirectory() as tempdir:
+        # original file on the client to be pushed to the exporter
+        original = Path(tempdir) / "original"
+        # new file read back from the exporter to the client
+        readback = Path(tempdir) / "readback"
 
-            # test accessing files with absolute path
+        # test accessing files with absolute path
 
-            # fill the original file with random bytes
-            original.write_bytes(randbytes(1024 * 1024 * 10))
-            # write the file to the storage on the exporter
-            client.write_local_file(str(original))
-            # read the storage on the exporter to a local file
-            client.read_local_file(str(readback))
-            # ensure the contents are equal
+        # fill the original file with random bytes
+        original.write_bytes(randbytes(1024 * 1024 * 10))
+        # write the file to the storage on the exporter
+        client.write_local_file(str(original))
+        # read the storage on the exporter to a local file
+        client.read_local_file(str(readback))
+        # ensure the contents are equal
+        assert original.read_bytes() == readback.read_bytes()
+
+        # test accessing files with relative path
+        with monkeypatch.context() as m:
+            m.chdir(tempdir)
+
+            original.write_bytes(randbytes(1024 * 1024 * 1))
+            client.write_local_file("original")
+            client.read_local_file("readback")
             assert original.read_bytes() == readback.read_bytes()
 
-            # test accessing files with relative path
-            with monkeypatch.context() as m:
-                m.chdir(tempdir)
-
-                original.write_bytes(randbytes(1024 * 1024 * 1))
-                client.write_local_file("original")
-                client.read_local_file("readback")
-                assert original.read_bytes() == readback.read_bytes()
-
-                original.write_bytes(randbytes(1024 * 1024 * 1))
-                client.write_local_file("./original")
-                client.read_local_file("./readback")
-                assert original.read_bytes() == readback.read_bytes()
+            original.write_bytes(randbytes(1024 * 1024 * 1))
+            client.write_local_file("./original")
+            client.read_local_file("./readback")
+            assert original.read_bytes() == readback.read_bytes()
 
 
 def test_drivers_mock_storage_mux_http():
@@ -437,13 +436,13 @@ def test_operator_for_path_strips_query_params():
     from .client import operator_for_path
 
     # HTTP URL without query parameters
-    path, operator, scheme = operator_for_path("https://cdn.example.com/images/image.raw.xz")
+    path, _, scheme = operator_for_path("https://cdn.example.com/images/image.raw.xz")
     assert scheme == "http"
     assert path == Path("/images/image.raw.xz")
 
     # HTTP URL with query parameters - query params are stripped because
     # signed URL downloads use original_url passthrough instead
-    path, operator, scheme = operator_for_path(
+    path, _, scheme = operator_for_path(
         "https://cdn.example.com/images/image.raw.xz?Expires=123&Signature=abc&Key-Pair-Id=xyz"
     )
     assert scheme == "http"
@@ -451,7 +450,7 @@ def test_operator_for_path_strips_query_params():
 
     # Filesystem path (use resolve() for the expected value since macOS
     # resolves /tmp to /private/tmp)
-    path, operator, scheme = operator_for_path("/tmp/image.raw.xz")
+    path, _operator, scheme = operator_for_path("/tmp/image.raw.xz")
     assert scheme == "fs"
     assert path == Path("/tmp/image.raw.xz").resolve()
 
@@ -505,22 +504,23 @@ def test_write_from_path_http_with_explicit_operator(tmp_path):
     guard, otherwise the HTTP URL goes through OpenDAL presign_read which mangles it
     into a double-host path like endpoint/https%3A/host/path.
     """
-    with serve(Opendal(scheme="fs", kwargs={"root": str(tmp_path)})) as client:
-        with _http_path_recording_server() as (port, received_paths):
-            url = f"http://127.0.0.1:{port}/path%40encoded/file.bin"
-            explicit_operator = Operator("http", endpoint=f"http://127.0.0.1:{port}")
-            client.write_from_path("dest.bin", url, operator=explicit_operator)
-            _assert_encoding_preserved(received_paths)
+    with (
+        serve(Opendal(scheme="fs", kwargs={"root": str(tmp_path)})) as client,
+        _http_path_recording_server() as (port, received_paths),
+    ):
+        url = f"http://127.0.0.1:{port}/path%40encoded/file.bin"
+        explicit_operator = Operator("http", endpoint=f"http://127.0.0.1:{port}")
+        client.write_from_path("dest.bin", url, operator=explicit_operator)
+        _assert_encoding_preserved(received_paths)
 
 
 def test_flash_http_with_explicit_operator():
     """FlasherClient.flash must use original_url bypass even when operator is passed explicitly."""
-    with serve(MockFlasher()) as flasher:
-        with _http_path_recording_server() as (port, received_paths):
-            url = f"http://127.0.0.1:{port}/path%40encoded/file.bin"
-            explicit_operator = Operator("http", endpoint=f"http://127.0.0.1:{port}")
-            flasher.flash(url, operator=explicit_operator)
-            _assert_encoding_preserved(received_paths)
+    with serve(MockFlasher()) as flasher, _http_path_recording_server() as (port, received_paths):
+        url = f"http://127.0.0.1:{port}/path%40encoded/file.bin"
+        explicit_operator = Operator("http", endpoint=f"http://127.0.0.1:{port}")
+        flasher.flash(url, operator=explicit_operator)
+        _assert_encoding_preserved(received_paths)
 
 
 def test_flash_http_url_preserves_percent_encoding():

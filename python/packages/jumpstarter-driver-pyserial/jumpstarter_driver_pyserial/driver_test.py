@@ -1,3 +1,4 @@
+import contextlib
 import time
 from types import SimpleNamespace
 from typing import cast
@@ -14,19 +15,21 @@ from jumpstarter.common.utils import serve
 
 
 def test_bare_pyserial():
-    with serve(PySerial(url="loop://")) as client:
-        with client.stream() as stream:
-            stream.send(b"hello")
-            assert "hello".startswith(stream.receive().decode("utf-8"))
+    with serve(PySerial(url="loop://")) as client, client.stream() as stream:
+        stream.send(b"hello")
+        assert "hello".startswith(stream.receive().decode("utf-8"))
+
 
 
 def test_second_exclusive_connect_surfaces_console_in_use():
     """A second exclusive stream should fail with a clean 'console in use' error."""
-    with serve(PySerial(url="loop://")) as client:
-        with client.stream() as _held:
-            with pytest.raises(Exception) as exc_info:
-                with client.stream() as stream:
-                    stream.receive()
+    with (
+        serve(PySerial(url="loop://")) as client,
+        client.stream() as _held,
+        pytest.raises(Exception) as exc_info,
+        client.stream() as stream,
+    ):
+        stream.receive()
 
     combined = []
     cause = exc_info.value
@@ -44,6 +47,7 @@ def test_second_exclusive_connect_surfaces_console_in_use():
     text = "\n".join(combined)
     assert "Console in use" in text
     assert "Unexpected <class" not in text
+
 
 
 def test_bare_open_pyserial():
@@ -91,53 +95,50 @@ def test_cps_throttling():
     cps = 5  # 5 characters per second
     test_data = b"hello"  # 5 characters
 
-    with serve(PySerial(url="loop://", cps=cps)) as client:
-        with client.stream() as stream:
-            # Just verify that the throttling doesn't break functionality
-            # The actual timing test is done at the async level
-            stream.send(test_data)
+    with serve(PySerial(url="loop://", cps=cps)) as client, client.stream() as stream:
+        # Just verify that the throttling doesn't break functionality
+        # The actual timing test is done at the async level
+        stream.send(test_data)
 
-            # Verify data was sent correctly (receive character by character)
-            received_data = b""
-            for _ in range(len(test_data)):
-                received_data += stream.receive()
-            assert test_data == received_data
+        # Verify data was sent correctly (receive character by character)
+        received_data = b""
+        for _ in range(len(test_data)):
+            received_data += stream.receive()
+        assert test_data == received_data
 
 
 def test_no_cps_throttling():
     """Test that without CPS throttling, transmission is fast."""
     test_data = b"hello"
 
-    with serve(PySerial(url="loop://")) as client:  # No CPS specified
-        with client.stream() as stream:
-            start_time = time.perf_counter()
-            stream.send(test_data)
-            end_time = time.perf_counter()
+    with serve(PySerial(url="loop://")) as client, client.stream() as stream:
+        start_time = time.perf_counter()
+        stream.send(test_data)
+        end_time = time.perf_counter()
 
-            elapsed_time = end_time - start_time
-            # Without throttling, should be fast; allow headroom for CI noise
-            assert elapsed_time < 0.5, f"Expected fast transmission, got {elapsed_time}s"
+        elapsed_time = end_time - start_time
+        # Without throttling, should be fast; allow headroom for CI noise
+        assert elapsed_time < 0.5, f"Expected fast transmission, got {elapsed_time}s"
 
-            received = stream.receive()
-            assert test_data.decode("utf-8").startswith(received.decode("utf-8"))
+        received = stream.receive()
+        assert test_data.decode("utf-8").startswith(received.decode("utf-8"))
 
 
 def test_cps_zero_disables_throttling():
     """Test that CPS=0 disables throttling."""
     test_data = b"hello"
 
-    with serve(PySerial(url="loop://", cps=0)) as client:
-        with client.stream() as stream:
-            start_time = time.perf_counter()
-            stream.send(test_data)
-            end_time = time.perf_counter()
+    with serve(PySerial(url="loop://", cps=0)) as client, client.stream() as stream:
+        start_time = time.perf_counter()
+        stream.send(test_data)
+        end_time = time.perf_counter()
 
-            elapsed_time = end_time - start_time
-            # With CPS=0, should be fast (no throttling) - allow headroom
-            assert elapsed_time < 0.5, f"Expected fast transmission with cps=0, got {elapsed_time}s"
+        elapsed_time = end_time - start_time
+        # With CPS=0, should be fast (no throttling) - allow headroom
+        assert elapsed_time < 0.5, f"Expected fast transmission with cps=0, got {elapsed_time}s"
 
-            received = stream.receive()
-            assert test_data.decode("utf-8").startswith(received.decode("utf-8"))
+        received = stream.receive()
+        assert test_data.decode("utf-8").startswith(received.decode("utf-8"))
 
 
 def test_throttled_stream_async():
@@ -264,10 +265,8 @@ def test_close_closes_transport(monkeypatch):
 
         def fake_close():
             orig_close()
-            try:
+            with contextlib.suppress(Exception):
                 protocol.connection_lost(None)
-            except Exception:
-                pass
 
         transport.close = fake_close
 
@@ -316,10 +315,8 @@ def test_close_from_outside_releases_port(monkeypatch):
         def fake_close():
             closed["called"] = True
             orig_close()
-            try:
+            with contextlib.suppress(Exception):
                 protocol.connection_lost(None)
-            except Exception:
-                pass
 
         transport.close = fake_close
 
@@ -333,13 +330,11 @@ def test_close_from_outside_releases_port(monkeypatch):
 
         driver = PySerial(url="/dev/ttyMOCK", check_present=False)
 
-        try:
+        with contextlib.suppress(Exception):
             async with driver.connect() as stream:
                 data = await stream.receive()
                 assert data == b"hello"
                 driver.close()
-        except Exception:
-            pass
 
         assert closed["called"]
 

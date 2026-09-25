@@ -5,10 +5,11 @@ import logging
 import math
 import time
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import anyio
+import anyio.lowlevel
 import click
 import grpc
 import grpc.aio
@@ -49,7 +50,7 @@ def _make_lease(name: str, client: str = "test-client") -> Lease:
         exporter_name=None,
         duration=timedelta(minutes=30),
         effective_duration=None,
-        begin_time=datetime.now(),
+        begin_time=datetime.now(tz=UTC),
         client=client,
         exporter="test-exporter",
         conditions=[],
@@ -129,7 +130,7 @@ async def test_shell_warns_when_expired_token_prevents_cleanup_on_normal_exit():
             token_state["expired_unrecovered"] = True
 
     async def fake_run_shell(*_args):
-        await anyio.sleep(0)
+        await anyio.lowlevel.checkpoint()
         return 0
 
     with (
@@ -1007,9 +1008,9 @@ class TestRunShellWithLeaseAsync:
         with (
             patch("jumpstarter_cli.shell.client_from_path", side_effect=fake_client_from_path),
             patch("jumpstarter_cli.shell._run_shell_only", return_value=0) as run_shell,
+            pytest.raises(ExporterUnreachableError),
         ):
-            with pytest.raises(ExporterUnreachableError):
-                await _run_shell_with_lease_async(lease, False, None, (), cancel_scope)
+            await _run_shell_with_lease_async(lease, False, None, (), cancel_scope)
 
         run_shell.assert_not_called()
 
@@ -1194,11 +1195,11 @@ class TestShellWithSignalHandlingExceptionGroup:
         with (
             patch("jumpstarter_cli.shell._monitor_token_expiry", new_callable=AsyncMock),
             patch("jumpstarter_cli.shell._run_shell_with_lease_async", side_effect=fake_run),
+            pytest.raises(BaseExceptionGroup) as exc_info,
         ):
-            with pytest.raises(BaseExceptionGroup) as exc_info:
-                await _shell_with_signal_handling(
-                    config, None, None, None, timedelta(minutes=1), False, (), None
-                )
+            await _shell_with_signal_handling(
+                config, None, None, None, timedelta(minutes=1), False, (), None
+            )
 
         assert isinstance(exc_info.value, BaseExceptionGroup)
         offline_exc = find_exception_in_group(exc_info.value, ExporterOfflineError)
@@ -1238,11 +1239,11 @@ class TestRetryLoopTimeout:
         with (
             patch("jumpstarter_cli.shell._monitor_token_expiry", new_callable=AsyncMock),
             patch("jumpstarter_cli.shell._run_shell_with_lease_async", side_effect=fake_run),
+            pytest.raises((ExporterUnreachableError, BaseExceptionGroup)) as exc_info,
         ):
-            with pytest.raises((ExporterUnreachableError, BaseExceptionGroup)) as exc_info:
-                await _shell_with_signal_handling(
-                    config, None, None, None, timedelta(minutes=1), False, (), None
-                )
+            await _shell_with_signal_handling(
+                config, None, None, None, timedelta(minutes=1), False, (), None
+            )
 
         exc = exc_info.value
         if isinstance(exc, BaseExceptionGroup):

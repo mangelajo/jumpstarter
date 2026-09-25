@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import subprocess
@@ -6,6 +7,7 @@ import time
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 from jumpstarter_driver_adb.driver import AdbServer
@@ -38,7 +40,7 @@ class HostOrchestratorBackend:
 
     delete_is_group_scoped = False
 
-    _paths = {
+    _paths: ClassVar[dict] = {
         "create": ("POST", "/cvds"),
         "start": ("POST", "{cvd}/:start"),
         "stop": ("POST", "{cvd}/:stop"),
@@ -148,7 +150,7 @@ class CvdCliBackend:
     keep the same shape.
     """
 
-    _subcommands = {
+    _subcommands: ClassVar[dict] = {
         "start": ["start", "--report_anonymous_usage_stats=n"],
         "stop": ["stop"],
         "restart": ["restart"],
@@ -173,7 +175,7 @@ class CvdCliBackend:
         argv = cvd_argv(self.socket, args)
         self.driver.logger.debug("running %s", " ".join(argv))
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
         except OSError as e:
             raise CuttlefishError(f"cannot run jumpstarter-exec at {exec_binary(self.socket)}: {e}") from e
         except subprocess.TimeoutExpired as e:
@@ -389,7 +391,7 @@ class Cuttlefish(Driver):
         self.logger.info(f"Auto-connecting ADB to {device}")
         try:
             adb.connect_device(device)
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.logger.warning("ADB connect to %s failed, will retry during boot wait", device)
         return device
 
@@ -399,10 +401,8 @@ class Cuttlefish(Driver):
             return
         device = self._cvd_device
         self.logger.info(f"Disconnecting ADB from {device}")
-        try:
+        with contextlib.suppress(Exception):
             adb.disconnect_device(device)
-        except Exception:
-            pass
 
     def _wait_boot(self, timeout: float = 300):
         """Wait for CVD to be ADB-reachable and fully booted."""
@@ -425,6 +425,7 @@ class Cuttlefish(Driver):
                     text=True,
                     timeout=5,
                     env=adb_env,
+                    check=False,
                 )
             except (subprocess.TimeoutExpired, OSError):
                 pass
@@ -435,6 +436,7 @@ class Cuttlefish(Driver):
                     text=True,
                     timeout=5,
                     env=adb_env,
+                    check=False,
                 )
                 for line in r.stdout.splitlines():
                     if device in line and "\tdevice" in line:
@@ -458,6 +460,7 @@ class Cuttlefish(Driver):
                     text=True,
                     timeout=10,
                     env=adb_env,
+                    check=False,
                 )
                 if r.stdout.strip() == "1":
                     self.logger.info("Boot completed on %s", device)

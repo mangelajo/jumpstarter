@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import logging
-from typing import Literal, Optional
+from typing import Literal
 
 from kubernetes_asyncio.client.exceptions import ApiException
 from kubernetes_asyncio.client.models import V1ObjectMeta, V1ObjectReference
@@ -23,7 +23,7 @@ CREATE_CLIENT_COUNT = 10
 
 
 class V1Alpha1ClientStatus(JsonBaseModel):
-    credential: Optional[SerializeV1ObjectReference] = None
+    credential: SerializeV1ObjectReference | None = None
     endpoint: str
 
 
@@ -31,7 +31,7 @@ class V1Alpha1Client(JsonBaseModel):
     api_version: Literal["jumpstarter.dev/v1alpha1"] = Field(alias="apiVersion", default="jumpstarter.dev/v1alpha1")
     kind: Literal["Client"] = Field(default="Client")
     metadata: SerializeV1ObjectMeta
-    status: Optional[V1Alpha1ClientStatus]
+    status: V1Alpha1ClientStatus | None
 
     @staticmethod
     def from_dict(dict: dict):
@@ -125,12 +125,11 @@ class ClientsV1Alpha1Api(AbstractAsyncCustomObjectApi):
                 namespace=self.namespace, group="jumpstarter.dev", plural="clients", version="v1alpha1", name=name
             )
             # check if the client status is updated with the credentials
-            if "status" in updated_client:
-                if "credential" in updated_client["status"]:
-                    return V1Alpha1Client.from_dict(updated_client)
+            if "status" in updated_client and "credential" in updated_client["status"]:
+                return V1Alpha1Client.from_dict(updated_client)
             count += 1
             await asyncio.sleep(CREATE_CLIENT_DELAY)
-        raise Exception("Timeout waiting for client credentials")
+        raise Exception("Timeout waiting for client credentials")  # noqa: TRY002
 
     async def list_clients(self) -> V1Alpha1List[V1Alpha1Client]:
         """List the client objects in the cluster async"""
@@ -172,7 +171,7 @@ class ClientsV1Alpha1Api(AbstractAsyncCustomObjectApi):
         """Rotate the internal token for a client by deleting its secret and waiting for regeneration."""
         client = await self.get_client(name)
         if client.status is None or client.status.credential is None:
-            raise Exception(f"Client '{name}' has no credential secret")
+            raise Exception(f"Client '{name}' has no credential secret")  # noqa: TRY002
 
         secret_name = client.status.credential.name
         await self.core_api.delete_namespaced_secret(secret_name, self.namespace)
@@ -188,7 +187,7 @@ class ClientsV1Alpha1Api(AbstractAsyncCustomObjectApi):
                     raise
             count += 1
             await asyncio.sleep(CREATE_CLIENT_DELAY)
-        raise Exception("Timeout waiting for token regeneration")
+        raise Exception("Timeout waiting for token regeneration")  # noqa: TRY002
 
     async def delete_client(self, name: str):
         """Delete a client object"""

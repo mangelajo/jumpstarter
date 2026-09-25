@@ -52,7 +52,7 @@ def test_launch_shell_no_motd_for_command(tmp_path, monkeypatch, capfd):
         allow=["*"],
         unsafe=False,
         use_profiles=False,
-        command=(shutil.which("true"),),
+        command=(shutil.which("true"),),  # type: ignore[arg-type]
         motd="Welcome to my-exporter!",
     )
     assert exit_code == 0
@@ -473,9 +473,11 @@ def test_resolve_drivers_config_propagates_unexpected_errors(monkeypatch):
     monkeypatch.delenv("JMP_DRIVERS_ALLOW", raising=False)
     monkeypatch.delenv("JMP_DRIVERS_UNSAFE", raising=False)
 
-    with patch("jumpstarter.config.user.UserConfigV1Alpha1.load", side_effect=RuntimeError("unexpected")):
-        with pytest.raises(RuntimeError, match="unexpected"):
-            _resolve_drivers_config()
+    with (
+        patch("jumpstarter.config.user.UserConfigV1Alpha1.load", side_effect=RuntimeError("unexpected")),
+        pytest.raises(RuntimeError, match="unexpected"),
+    ):
+        _resolve_drivers_config()
 
 
 def test_launch_shell_logs_exit_status(tmp_path, caplog):

@@ -29,7 +29,7 @@ class WithOptions:
     show_disabled: bool = False
 
 
-def add_display_columns(table, options: WithOptions = None):
+def add_display_columns(table, options: WithOptions | None = None):
     if options is None:
         options = WithOptions()
     table.add_column("NAME")
@@ -48,7 +48,9 @@ def add_display_columns(table, options: WithOptions = None):
         table.add_column("RELEASE TIME")
 
 
-def add_exporter_row(table, exporter, options: WithOptions = None, lease_info: tuple[str, str, str] | None = None):
+def add_exporter_row(
+    table, exporter, options: WithOptions | None = None, lease_info: tuple[str, str, str] | None = None
+):
     if options is None:
         options = WithOptions()
     row_data = []
@@ -63,7 +65,7 @@ def add_exporter_row(table, exporter, options: WithOptions = None, lease_info: t
         status_str = str(exporter.status) if exporter.status else "UNKNOWN"
         row_data.append(status_str)
     labels = exporter.labels
-    row_data.append(",".join(("{}={}".format(k, v) for k, v in sorted(labels.items()))))
+    row_data.append(",".join((f"{k}={v}" for k, v in sorted(labels.items()))))
     if options.show_leases:
         if lease_info:
             lease_client, lease_status, expected_release = lease_info
@@ -77,11 +79,11 @@ def add_exporter_row(table, exporter, options: WithOptions = None, lease_info: t
 def parse_identifier(identifier: str, kind: str) -> tuple[str, str]:
     segments = identifier.split("/")
     if len(segments) != 4:
-        raise ValueError("incorrect number of segments in identifier, expecting 4, got {}".format(len(segments)))
+        raise ValueError(f"incorrect number of segments in identifier, expecting 4, got {len(segments)}")
     if segments[0] != "namespaces":
-        raise ValueError("incorrect first segment in identifier, expecting namespaces, got {}".format(segments[0]))
+        raise ValueError(f"incorrect first segment in identifier, expecting namespaces, got {segments[0]}")
     if segments[2] != kind:
-        raise ValueError("incorrect third segment in identifier, expecting {}, got {}".format(kind, segments[2]))
+        raise ValueError(f"incorrect third segment in identifier, expecting {kind}, got {segments[2]}")
     return segments[1], segments[3]
 
 
@@ -129,10 +131,10 @@ class Exporter(BaseModel):
         )
 
     @classmethod
-    def rich_add_columns(cls, table, options: WithOptions = None):
+    def rich_add_columns(cls, table, options: WithOptions | None = None):
         add_display_columns(table, options)
 
-    def rich_add_rows(self, table, options: WithOptions = None):
+    def rich_add_rows(self, table, options: WithOptions | None = None):
         lease_info = None
         if options and options.show_leases and self.lease:
             lease_client = self.lease.client
@@ -509,7 +511,7 @@ class ClientService:
         with translate_grpc_exceptions():
             exporter = await self.stub.GetExporter(
                 client_pb2.GetExporterRequest(
-                    name="namespaces/{}/exporters/{}".format(self.namespace, name),
+                    name=f"namespaces/{self.namespace}/exporters/{name}",
                     show_hidden_labels=show_hidden_labels,
                 )
             )
@@ -525,11 +527,11 @@ class ClientService:
     ):
         with translate_grpc_exceptions():
             exporters = await self.stub.ListExporters(
-                client_pb2.ListExportersRequest(
-                    parent="namespaces/{}".format(self.namespace),
-                    page_size=page_size,
-                    page_token=page_token,
-                    filter=filter,
+                client_pb2.ListExportersRequest(  # type: ignore[call-arg]
+                    parent=f"namespaces/{self.namespace}",
+                    page_size=page_size,  # type: ignore[arg-type]
+                    page_token=page_token,  # type: ignore[arg-type]
+                    filter=filter,  # type: ignore[arg-type]
                     show_hidden_labels=show_hidden_labels,
                 )
             )
@@ -539,7 +541,7 @@ class ClientService:
         with translate_grpc_exceptions():
             lease = await self.stub.GetLease(
                 client_pb2.GetLeaseRequest(
-                    name="namespaces/{}/leases/{}".format(self.namespace, name),
+                    name=f"namespaces/{self.namespace}/leases/{name}",
                 )
             )
         return Lease.from_protobuf(lease)
@@ -555,11 +557,11 @@ class ClientService:
     ):
         with translate_grpc_exceptions():
             leases = await self.stub.ListLeases(
-                client_pb2.ListLeasesRequest(
-                    parent="namespaces/{}".format(self.namespace),
-                    page_size=page_size,
-                    page_token=page_token,
-                    filter=extract_match_labels_filter(filter),
+                client_pb2.ListLeasesRequest(  # type: ignore[call-arg]
+                    parent=f"namespaces/{self.namespace}",
+                    page_size=page_size,  # type: ignore[arg-type]
+                    page_token=page_token,  # type: ignore[arg-type]
+                    filter=extract_match_labels_filter(filter),  # type: ignore[arg-type]
                     only_active=only_active,
                     tag_filter=tag_filter or "",
                 )
@@ -608,7 +610,7 @@ class ClientService:
         with translate_grpc_exceptions():
             lease = await self.stub.CreateLease(
                 client_pb2.CreateLeaseRequest(
-                    parent="namespaces/{}".format(self.namespace),
+                    parent=f"namespaces/{self.namespace}",
                     lease=lease_pb,
                     lease_id=lease_id or "",
                 )
@@ -626,7 +628,7 @@ class ClientService:
         remove_shared_with: list[str] | None = None,
     ):
         lease_pb = client_pb2.Lease(
-            name="namespaces/{}/leases/{}".format(self.namespace, name),
+            name=f"namespaces/{self.namespace}/leases/{name}",
         )
 
         update_fields = []
@@ -675,7 +677,7 @@ class ClientService:
         with translate_grpc_exceptions():
             await self.stub.DeleteLease(
                 client_pb2.DeleteLeaseRequest(
-                    name="namespaces/{}/leases/{}".format(self.namespace, name),
+                    name=f"namespaces/{self.namespace}/leases/{name}",
                 )
             )
 
@@ -683,7 +685,7 @@ class ClientService:
         with translate_grpc_exceptions():
             response = await self.stub.RotateToken(
                 client_pb2.RotateTokenRequest(
-                    parent="namespaces/{}".format(self.namespace),
+                    parent=f"namespaces/{self.namespace}",
                 )
             )
         return response.token
@@ -706,8 +708,8 @@ class MultipathExporterStub:
     def __post_init__(self, channels):
         for channel in channels:
             stub = SimpleNamespace()
-            jumpstarter_pb2_grpc.ExporterServiceStub.__init__(stub, channel)
-            router_pb2_grpc.RouterServiceStub.__init__(stub, channel)
+            jumpstarter_pb2_grpc.ExporterServiceStub.__init__(stub, channel)  # type: ignore[arg-type]
+            router_pb2_grpc.RouterServiceStub.__init__(stub, channel)  # type: ignore[arg-type]
             self.__stubs[channel] = stub
 
     def __getattr__(self, name):

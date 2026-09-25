@@ -246,7 +246,7 @@ class Driver(
             # Propagate context.abort() from lookup/handlers without recording
             # metrics (avoids client-controlled operation label cardinality).
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             await self._handle_driver_exception(e, op, started, context)
 
     async def StreamingDriverCall(self, request, context):
@@ -289,7 +289,7 @@ class Driver(
             # Propagate context.abort() from lookup/handlers without recording
             # metrics (avoids client-controlled operation label cardinality).
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             await self._handle_driver_exception(e, op, started, context)
 
     @asynccontextmanager
@@ -377,7 +377,7 @@ class Driver(
         """Redact query parameters from a URL to avoid leaking credentials in logs."""
         parsed = urlparse(url)
         if parsed.query:
-            return urlunparse(parsed._replace(query="[REDACTED]"))
+            return urlunparse(parsed._replace(query="[REDACTED]"))  # type: ignore[return-value]
         return url
 
     _SENSITIVE_HEADER_PREFIXES = ("authorization", "cookie", "proxy-authorization", "x-amz-", "x-ms-", "x-goog-")
@@ -436,9 +436,8 @@ class Driver(
                     async with aiohttp.request(
                         method, self._make_url(url), headers=headers, raise_for_status=True,
                         data=remote, timeout=client_timeout,
-                    ) as _resp:
-                        async with stream:
-                            yield ProgressStream(stream=stream, logging=True)
+                    ) as _resp, stream:
+                        yield ProgressStream(stream=stream, logging=True)
                 case _:
                     # INVARIANT: method is always one of GET or PUT, see PresignedRequestResource
                     raise ValueError("unreachable")

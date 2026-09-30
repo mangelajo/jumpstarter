@@ -1,15 +1,17 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"       # final releases only (v0.9.0, v1.0.0, etc.)
-      # RC tags (v*-rc.*) are excluded by not matching this pattern
+  release:
+    types:
+      - published       # fires when a GitHub Release is created (drafts excluded)
   workflow_dispatch:
 
 jobs:
   publish:
     name: Build and publish to PyPI
+    # RC releases are created with --prerelease; only publish final releases.
+    # For workflow_dispatch, github.event.release is empty, so this passes.
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

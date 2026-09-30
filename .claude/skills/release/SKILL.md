@@ -327,10 +327,10 @@ git reset --hard origin/release-X.Y
 The tag push triggers:
 - `build-images.yaml` — builds and pushes all container images
 - `trigger-packages.yaml` — regenerates the Python package index
-- `publish-pypi.yaml` — builds and publishes the Python packages to PyPI (final releases only)
 
 The GitHub Release triggers:
 - `release-operator-installer.yaml` — uploads `operator-installer.yaml` to the release
+- `publish-pypi.yaml` — builds and publishes the Python packages to PyPI (final releases only, RC releases are skipped)
 
 Tell the user that CI is now building the container images and you will monitor progress.
 

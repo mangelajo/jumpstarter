@@ -22,7 +22,7 @@ Release input: $ARGUMENTS
 - Python packages are versioned automatically from git tags via `hatch-vcs` — no manual version files.
 - The `bundle/` directory is NOT committed to the repo.
 - `GITHUB_USER` env var controls the fork for community-operators and for pushing version-bump PRs. Auto-detected via `gh api user -q .login` if not set.
-- `UV_PUBLISH_TOKEN` env var is required for PyPI publishing (final releases only). Must be set before running `uv publish`.
+- `UV_PUBLISH_TOKEN` env var is required for the manual PyPI publish fallback (final releases only). Must be set before running `uv publish`. The `publish-pypi.yaml` workflow uses OIDC trusted publishing and needs no token.
 - Do NOT modify `controller/deploy/operator/api/v1alpha1/jumpstarter_types.go` — the operator resolves `:latest` image defaults to its own version at runtime.
 
 ## Ordering constraint
@@ -327,6 +327,7 @@ git reset --hard origin/release-X.Y
 The tag push triggers:
 - `build-images.yaml` — builds and pushes all container images
 - `trigger-packages.yaml` — regenerates the Python package index
+- `publish-pypi.yaml` — builds and publishes the Python packages to PyPI (final releases only)
 
 The GitHub Release triggers:
 - `release-operator-installer.yaml` — uploads `operator-installer.yaml` to the release
@@ -374,6 +375,7 @@ Confirm the `.whl` and `.tar.gz` filenames contain the expected version (e.g., `
 
 ```bash
 # Requires UV_PUBLISH_TOKEN set to a PyPI API token
+${UV_PUBLISH_TOKEN:?ERROR: UV_PUBLISH_TOKEN is not set — get a PyPI API token first}
 uv publish dist/jumpstarter-X.Y.Z* dist/jumpstarter_*-X.Y.Z*
 ```
 
@@ -383,7 +385,7 @@ uv publish dist/jumpstarter-X.Y.Z* dist/jumpstarter_*-X.Y.Z*
 
 1. Check which packages already exist on PyPI (any version):
    ```bash
-   for f in dist/jumpstarter_*-X.Y.Z-py3-none-any.whl; do
+   for f in dist/jumpstarter-X.Y.Z-py3-none-any.whl dist/jumpstarter_*-X.Y.Z-py3-none-any.whl; do
      name=$(basename "$f" | sed 's/-X.Y.Z-.*//' | tr '_' '-')
      code=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/${name}/json")
      [ "$code" = "200" ] && echo "EXISTS: $name" || echo "NEW:    $name"
@@ -399,7 +401,7 @@ uv publish dist/jumpstarter-X.Y.Z* dist/jumpstarter_*-X.Y.Z*
    ```
 4. Report to the user which packages succeeded and which are still pending.
 
-**Long-term solution:** The `publish-pypi.yaml` workflow uses PyPI Trusted Publishing (OIDC, no token). Once configured, tag pushes handle everything automatically and the new-project rate limit is less of an issue since each project is pre-registered via a pending publisher.
+**Long-term solution:** The `publish-pypi.yaml` workflow uses PyPI Trusted Publishing (OIDC, no token). Once configured, tag pushes handle everything automatically. Note: a pending publisher does not pre-create the PyPI project — the first publish creates it, so the new-project rate limit can still apply on the first release of a new package.
 
 After publishing, verify a representative package is available:
 

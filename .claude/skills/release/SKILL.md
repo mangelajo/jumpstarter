@@ -349,7 +349,7 @@ When the build-images workflow succeeds, inform the user and proceed to Phase 4 
 
 #### Phase 4: Publish to PyPI (final releases only)
 
-**Skip this phase entirely for RC releases.** Only final releases (`vX.Y.Z` without `-rc`) are published to PyPI.
+**Skip this phase entirely for RC releases.** Only final releases (`vX.Y.Z` without `-rc`) are published to PyPI; RCs are published to the internal package repo instead.
 
 **Prerequisite:** Check out the tag so `hatch-vcs` derives the correct version:
 

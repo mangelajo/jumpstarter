@@ -9,7 +9,8 @@ on:
 jobs:
   publish:
     name: Build and publish to PyPI
-    # RC releases are created with --prerelease; only publish final releases.
+    # Only final releases go to PyPI; RCs are published to the internal
+    # package repo instead. RC releases are created with --prerelease.
     # For workflow_dispatch, github.event.release is empty, so this passes.
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest

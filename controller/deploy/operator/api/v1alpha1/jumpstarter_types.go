@@ -306,7 +306,7 @@ type TelemetryConfig struct {
 	// Number of telemetry replicas to run.
 	// Multiple replicas provide HA; each exporter connects to exactly one replica
 	// via a persistent MetricsStream, so Prometheus sum-by queries across replicas
-	// yield exact totals without double-counting (see JEP-0013 DD-8).
+	// yield exact totals without double-counting.
 	// Set to 0 to suspend the telemetry deployment (Deployment stays but no pods run,
 	// Service and other resources are preserved).
 	// Note: when replicas is set to 0, the controller also removes the telemetry
@@ -328,9 +328,48 @@ type TelemetryConfig struct {
 	// Use this to configure TLS when not using cert-manager.
 	GRPC TelemetryGRPCConfig `json:"grpc,omitempty"`
 
-	// Metrics configures reverse-scrape fan-out and Prometheus exposition
-	// (JEP-0013). Loki and ServiceMonitor fields are later phases.
+	// Metrics configures reverse-scrape fan-out and Prometheus exposition.
 	Metrics TelemetryMetricsConfig `json:"metrics,omitempty"`
+
+	// Loki configures optional HTTP push of ingested logs to a Loki-compatible
+	// endpoint. When url is empty, telemetry runs metrics-only.
+	Loki TelemetryLokiConfig `json:"loki,omitempty"`
+
+	// Backpressure configures the Loki log push ring buffer.
+	Backpressure TelemetryBackpressureConfig `json:"backpressure,omitempty"`
+}
+
+// TelemetryLokiConfig configures Loki HTTP push from the telemetry service.
+type TelemetryLokiConfig struct {
+	// Loki push endpoint (http:// or https://). Optional — telemetry can run
+	// metrics-only without Loki. grpc:// is reserved but not implemented yet.
+	URL string `json:"url,omitempty"`
+
+	// Secret with Loki credentials (username/password and/or token keys).
+	// Only the telemetry pod holds Loki credentials.
+	SecretRef string `json:"secretRef,omitempty"`
+
+	// TLS settings for the Loki endpoint.
+	TLS TelemetryLokiTLSConfig `json:"tls,omitempty"`
+}
+
+// TelemetryLokiTLSConfig configures TLS for the Loki push endpoint.
+type TelemetryLokiTLSConfig struct {
+	// Secret containing a CA bundle (ca.crt key) to trust for the Loki endpoint.
+	CASecretRef string `json:"caSecretRef,omitempty"`
+
+	// Disable TLS certificate verification (development/testing only).
+	// +kubebuilder:default=false
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+}
+
+// TelemetryBackpressureConfig configures the Loki log push ring buffer.
+type TelemetryBackpressureConfig struct {
+	// Ring buffer depth for Loki log push. On overflow, dropped entries are
+	// replaced by a single drop-marker LogEntry.
+	// +kubebuilder:default=10000
+	// +kubebuilder:validation:Minimum=1
+	QueueDepth int32 `json:"queueDepth,omitempty"`
 }
 
 // TelemetryGRPCConfig defines gRPC configuration for the telemetry service.
@@ -364,7 +403,7 @@ type TelemetryMetricsConfig struct {
 
 	// Max wait for parallel exporter MetricsStream responses during a /metrics fan-out.
 	// Should be lower than the Prometheus scrape_timeout.
-	// JEP-0013 specifies the 7s default and no maximum. 60s bounds the fan-out
+	// The default is 7s. 60s bounds the fan-out
 	// wait and the HTTP write timeout that grows with this value.
 	// +kubebuilder:default="7s"
 	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s') && duration(self) <= duration('60s')",message="scrapeTimeout must be greater than 0 and at most 60s"

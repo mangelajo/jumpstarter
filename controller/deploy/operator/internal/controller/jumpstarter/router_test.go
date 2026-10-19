@@ -321,6 +321,174 @@ var _ = Describe("Router Lifecycle", func() {
 		}
 	})
 
+	It("deletes the Services of a removed router endpoint", func() {
+		By("creating with 2 router endpoints")
+		spec := makeJumpstarterSpec(new(int32(1)))
+		spec.Routers.GRPC.Endpoints = []operatorv1alpha1.Endpoint{{Address: "router"}, {Address: "router-alt"}}
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       spec,
+		})).To(Succeed())
+		doReconcile()
+
+		svc := &corev1.Service{}
+		secondEndpoint := types.NamespacedName{Name: routerServiceName(0) + "-1", Namespace: crNamespace}
+		Expect(k8sClient.Get(ctx, secondEndpoint, svc)).To(Succeed())
+
+		By("removing the second endpoint")
+		js := &operatorv1alpha1.Jumpstarter{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: crName, Namespace: crNamespace}, js)).To(Succeed())
+		js.Spec.Routers.GRPC.Endpoints = js.Spec.Routers.GRPC.Endpoints[:1]
+		Expect(k8sClient.Update(ctx, js)).To(Succeed())
+		doReconcile()
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name: routerServiceName(0), Namespace: crNamespace,
+		}, svc)).To(Succeed())
+		err := k8sClient.Get(ctx, secondEndpoint, svc)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "Service for the removed endpoint should be deleted")
+	})
+
+	It("deletes the Service of a type the router endpoint no longer enables", func() {
+		By("creating an endpoint with ClusterIP, LoadBalancer and NodePort enabled")
+		spec := makeJumpstarterSpec(new(int32(1)))
+		spec.Routers.GRPC.Endpoints = []operatorv1alpha1.Endpoint{{
+			Address:      "router",
+			ClusterIP:    &operatorv1alpha1.ClusterIPConfig{Enabled: true},
+			LoadBalancer: &operatorv1alpha1.LoadBalancerConfig{Enabled: true},
+			NodePort:     &operatorv1alpha1.NodePortConfig{Enabled: true},
+		}}
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       spec,
+		})).To(Succeed())
+		doReconcile()
+
+		svc := &corev1.Service{}
+		clusterIP := types.NamespacedName{Name: routerServiceName(0), Namespace: crNamespace}
+		loadBalancer := types.NamespacedName{Name: routerServiceName(0) + "-lb", Namespace: crNamespace}
+		nodePort := types.NamespacedName{Name: routerServiceName(0) + "-np", Namespace: crNamespace}
+		for _, name := range []types.NamespacedName{clusterIP, loadBalancer, nodePort} {
+			Expect(k8sClient.Get(ctx, name, svc)).To(Succeed(), "Service %s should exist", name.Name)
+		}
+
+		By("disabling LoadBalancer on the endpoint")
+		js := &operatorv1alpha1.Jumpstarter{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: crName, Namespace: crNamespace}, js)).To(Succeed())
+		js.Spec.Routers.GRPC.Endpoints[0].LoadBalancer.Enabled = false
+		Expect(k8sClient.Update(ctx, js)).To(Succeed())
+		doReconcile()
+
+		for _, name := range []types.NamespacedName{clusterIP, nodePort} {
+			Expect(k8sClient.Get(ctx, name, svc)).To(Succeed(), "Service %s should be kept", name.Name)
+		}
+		err := k8sClient.Get(ctx, loadBalancer, svc)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "LoadBalancer Service should be deleted")
+	})
+
+	It("deletes the Service of a disabled type whose endpoint overrides the router label", func() {
+		By("creating an endpoint whose LoadBalancer labels override the router label")
+		spec := makeJumpstarterSpec(new(int32(1)))
+		spec.Routers.GRPC.Endpoints = []operatorv1alpha1.Endpoint{{
+			Address:   "router",
+			ClusterIP: &operatorv1alpha1.ClusterIPConfig{Enabled: true},
+			LoadBalancer: &operatorv1alpha1.LoadBalancerConfig{
+				Enabled: true,
+				Labels:  map[string]string{"router": "other"},
+			},
+		}}
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       spec,
+		})).To(Succeed())
+		doReconcile()
+
+		svc := &corev1.Service{}
+		loadBalancer := types.NamespacedName{Name: routerServiceName(0) + "-lb", Namespace: crNamespace}
+		Expect(k8sClient.Get(ctx, loadBalancer, svc)).To(Succeed())
+		Expect(svc.Labels).To(HaveKeyWithValue("router", "other"))
+
+		By("disabling LoadBalancer on the endpoint")
+		js := &operatorv1alpha1.Jumpstarter{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: crName, Namespace: crNamespace}, js)).To(Succeed())
+		js.Spec.Routers.GRPC.Endpoints[0].LoadBalancer.Enabled = false
+		Expect(k8sClient.Update(ctx, js)).To(Succeed())
+		doReconcile()
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name: routerServiceName(0), Namespace: crNamespace,
+		}, svc)).To(Succeed())
+		err := k8sClient.Get(ctx, loadBalancer, svc)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "relabeled LoadBalancer Service should be deleted")
+	})
+
+	It("deletes the router Services when no router endpoint is configured", func() {
+		By("creating an endpoint with ClusterIP enabled and no base domain")
+		spec := makeJumpstarterSpec(new(int32(1)))
+		spec.BaseDomain = ""
+		spec.Routers.GRPC.Endpoints = []operatorv1alpha1.Endpoint{{
+			Address:   "router",
+			ClusterIP: &operatorv1alpha1.ClusterIPConfig{Enabled: true},
+		}}
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       spec,
+		})).To(Succeed())
+		doReconcile()
+
+		svc := &corev1.Service{}
+		router := types.NamespacedName{Name: routerServiceName(0), Namespace: crNamespace}
+		Expect(k8sClient.Get(ctx, router, svc)).To(Succeed())
+
+		By("removing the endpoint: without a base domain, no default endpoint replaces it")
+		js := &operatorv1alpha1.Jumpstarter{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: crName, Namespace: crNamespace}, js)).To(Succeed())
+		js.Spec.Routers.GRPC.Endpoints = nil
+		Expect(k8sClient.Update(ctx, js)).To(Succeed())
+		doReconcile()
+
+		err := k8sClient.Get(ctx, router, svc)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "Service of the removed endpoint should be deleted")
+	})
+
+	It("does not delete the Jumpstarter's Services that are not router Services", func() {
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       makeJumpstarterSpec(new(int32(1))),
+		})).To(Succeed())
+		doReconcile()
+
+		js := &operatorv1alpha1.Jumpstarter{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: crName, Namespace: crNamespace}, js)).To(Succeed())
+		svc := &corev1.Service{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name: "controller-grpc", Namespace: crNamespace,
+		}, svc)).To(Succeed())
+		Expect(metav1.IsControlledBy(svc, js)).To(BeTrue())
+	})
+
+	It("does not delete a router-named Service the Jumpstarter does not control", func() {
+		By("creating a Service named like an excess router replica, without an owner")
+		Expect(k8sClient.Create(ctx, &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      routerServiceName(1),
+				Namespace: crNamespace,
+				Labels:    map[string]string{"router": crName},
+			},
+			Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 8083}}},
+		})).To(Succeed())
+
+		Expect(k8sClient.Create(ctx, &operatorv1alpha1.Jumpstarter{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: crNamespace},
+			Spec:       makeJumpstarterSpec(new(int32(1))),
+		})).To(Succeed())
+		doReconcile()
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name: routerServiceName(1), Namespace: crNamespace,
+		}, &corev1.Service{})).To(Succeed())
+	})
+
 	It("updates the Deployment when the image changes", func() {
 		By("creating with initial image")
 		spec := makeJumpstarterSpec(new(int32(1)))

@@ -112,7 +112,7 @@ class CuttlefishClient(CompositeClient):
         parsed = _parse(self.call("get_webrtc_config"))
         return parsed if isinstance(parsed, dict) else {}
 
-    def status(self) -> str:
+    def status(self) -> str:  # ty: ignore[invalid-property-type-override]
         return self.call("status")
 
     def list_operations(self) -> dict | list | str:
